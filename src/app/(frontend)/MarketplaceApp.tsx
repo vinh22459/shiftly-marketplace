@@ -150,6 +150,65 @@ type EmployerJobRow = Job & {
   applicationCount: number
 }
 
+const SESSION_STORAGE_KEY = 'shiftly_active_session'
+const PAGE_STORAGE_KEY = 'shiftly_current_page'
+
+type PersistedSession = {
+  email: string
+  password: string
+  name?: string
+  role?: AuthRole
+}
+
+function readPersistedSession(): PersistedSession | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as PersistedSession
+    if (parsed && typeof parsed.email === 'string' && parsed.email.trim()) {
+      return parsed
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return null
+}
+
+function writePersistedSession(session: PersistedSession | null) {
+  if (typeof window === 'undefined') return
+  try {
+    if (!session) {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY)
+      window.localStorage.removeItem(PAGE_STORAGE_KEY)
+      return
+    }
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function readPersistedPage(): Page | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(PAGE_STORAGE_KEY) as Page | null
+    if (raw) return raw
+  } catch {
+    // ignore storage errors
+  }
+  return null
+}
+
+function writePersistedPage(nextPage: Page) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(PAGE_STORAGE_KEY, nextPage)
+  } catch {
+    // ignore storage errors
+  }
+}
+
 const jobCategories = [
   'Tất cả ngành nghề',
   'F&B / Phục vụ',
@@ -160,15 +219,73 @@ const jobCategories = [
   'Kho vận / Giao nhận',
 ]
 
-const locations = [
-  'Tất cả khu vực',
-  'Quận 1',
-  'TP. Thủ Đức',
-  'Quận 7',
-  'Quận Tân Bình',
-  'Quận 10',
-  'Quận Bình Thạnh',
+const PROVINCES_63 = [
+  'An Giang',
+  'Bà Rịa - Vũng Tàu',
+  'Bắc Giang',
+  'Bắc Kạn',
+  'Bạc Liêu',
+  'Bắc Ninh',
+  'Bến Tre',
+  'Bình Định',
+  'Bình Dương',
+  'Bình Phước',
+  'Bình Thuận',
+  'Cà Mau',
+  'Cần Thơ',
+  'Cao Bằng',
+  'Đà Nẵng',
+  'Đắk Lắk',
+  'Đắk Nông',
+  'Điện Biên',
+  'Đồng Nai',
+  'Đồng Tháp',
+  'Gia Lai',
+  'Hà Giang',
+  'Hà Nam',
+  'Hà Nội',
+  'Hà Tĩnh',
+  'Hải Dương',
+  'Hải Phòng',
+  'Hậu Giang',
+  'Hòa Bình',
+  'Huế',
+  'Hưng Yên',
+  'Khánh Hòa',
+  'Kiên Giang',
+  'Kon Tum',
+  'Lai Châu',
+  'Lâm Đồng',
+  'Lạng Sơn',
+  'Lào Cai',
+  'Long An',
+  'Nam Định',
+  'Nghệ An',
+  'Ninh Bình',
+  'Ninh Thuận',
+  'Phú Thọ',
+  'Phú Yên',
+  'Quảng Bình',
+  'Quảng Nam',
+  'Quảng Ngãi',
+  'Quảng Ninh',
+  'Quảng Trị',
+  'Sóc Trăng',
+  'Sơn La',
+  'Tây Ninh',
+  'Thái Bình',
+  'Thái Nguyên',
+  'Thanh Hóa',
+  'Tiền Giang',
+  'TP. Hồ Chí Minh',
+  'Trà Vinh',
+  'Tuyên Quang',
+  'Vĩnh Long',
+  'Vĩnh Phúc',
+  'Yên Bái',
 ]
+
+const locations = ['Tất cả tỉnh / thành phố', ...PROVINCES_63]
 
 const salaryRanges = [
   ['all', 'Tất cả mức lương'],
@@ -522,12 +639,16 @@ function Hero({
 function Filters({
   category,
   setCategory,
+  location,
+  setLocation,
   salary,
   setSalary,
   onResetAll,
 }: {
   category: string
   setCategory: (v: string) => void
+  location: string
+  setLocation: (v: string) => void
   salary: string
   setSalary: (v: string) => void
   onResetAll: () => void
@@ -547,6 +668,20 @@ function Filters({
             {item}
           </label>
         ))}
+      </div>
+      <div className="filter-section bordered">
+        <h3>Tỉnh / Thành phố (63 tỉnh thành)</h3>
+        <select
+          className="filter-select"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+        >
+          {locations.map((loc) => (
+            <option value={loc} key={loc}>
+              {loc}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="filter-section bordered">
         <h3>Mức lương theo giờ</h3>
@@ -592,14 +727,25 @@ function FindJobs({
 }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('Tất cả ngành nghề')
-  const [location, setLocation] = useState('Tất cả khu vực')
+  const [location, setLocation] = useState('Tất cả tỉnh / thành phố')
   const [salary, setSalary] = useState('all')
-  const [visible, setVisible] = useState(4)
+  const [visible, setVisible] = useState(6)
 
-  const matchesArea = (place: string, selectedLocation: string) => {
-    if (selectedLocation === 'Tất cả khu vực') return true
-    const parts = place.split(',').map((part) => part.trim().toLowerCase())
-    return parts.includes(selectedLocation.trim().toLowerCase())
+  const matchesProvince = (place: string, selectedProvince: string) => {
+    if (selectedProvince === 'Tất cả tỉnh / thành phố') return true
+    const normalize = (str: string) =>
+      str
+        .toLowerCase()
+        .replace(/tp\.?\s*/g, '')
+        .replace(/thành phố\s*/g, '')
+        .replace(/tỉnh\s*/g, '')
+        .trim()
+    const target = normalize(selectedProvince)
+    const parts = place.split(',').map((part) => normalize(part))
+    return (
+      parts.some((p) => p === target || p.includes(target)) ||
+      normalize(place).includes(target)
+    )
   }
 
   const filtered = useMemo(
@@ -609,7 +755,7 @@ function FindJobs({
           .toLowerCase()
           .includes(query.trim().toLowerCase())
         const matchedCategory = category === 'Tất cả ngành nghề' || job.category === category
-        const area = matchesArea(job.place, location)
+        const area = matchesProvince(job.place, location)
         const pay =
           salary === 'all' ||
           (salary === 'under-30' && job.hourlyRate < 30) ||
@@ -625,7 +771,7 @@ function FindJobs({
       <Hero
         eyebrow="TÌM CƠ HỘI TIẾP THEO CỦA BẠN"
         title="Tìm công việc phù hợp với lịch học."
-        copy="Khám phá hàng trăm việc làm bán thời gian đa ngành nghề dành cho sinh viên gần bạn."
+        copy="Khám phá việc làm bán thời gian đa ngành nghề trên khắp 63 tỉnh thành Việt Nam."
       />
       <section className="search-bar">
         <label>
@@ -634,29 +780,31 @@ function FindJobs({
             value={query}
             onChange={(e) => {
               setQuery(e.target.value)
-              setVisible(4)
+              setVisible(6)
             }}
             placeholder="Pha chế, Gia sư, Bán hàng, Marketing, Sự kiện..."
           />
         </label>
         <label className="location-field">
-          <span>Khu vực</span>
+          <span>Tỉnh / Thành phố</span>
           <select
             value={location}
             onChange={(e) => {
               setLocation(e.target.value)
-              setVisible(4)
+              setVisible(6)
             }}
           >
             {locations.map((item) => (
-              <option key={item}>{item}</option>
+              <option key={item} value={item}>
+                {item}
+              </option>
             ))}
           </select>
         </label>
         <button
           type="button"
           onClick={() => {
-            setVisible(filtered.length || 4)
+            setVisible(filtered.length || 6)
           }}
         >
           <Search size={15} /> Tìm việc
@@ -667,23 +815,31 @@ function FindJobs({
           category={category}
           setCategory={(v) => {
             setCategory(v)
-            setVisible(4)
+            setVisible(6)
+          }}
+          location={location}
+          setLocation={(v) => {
+            setLocation(v)
+            setVisible(6)
           }}
           salary={salary}
           setSalary={(v) => {
             setSalary(v)
-            setVisible(4)
+            setVisible(6)
           }}
           onResetAll={() => {
             setCategory('Tất cả ngành nghề')
-            setLocation('Tất cả khu vực')
+            setLocation('Tất cả tỉnh / thành phố')
             setSalary('all')
-            setVisible(4)
+            setVisible(6)
           }}
         />
         <div className="job-results">
           <div className="results-heading">
-            <h2>{filtered.length} việc làm gần bạn</h2>
+            <h2>
+              {filtered.length} việc làm
+              {location !== 'Tất cả tỉnh / thành phố' ? ` tại ${location}` : ' trên toàn quốc'}
+            </h2>
             <span>
               Sắp xếp: <strong>Đề xuất</strong> <ChevronDown size={12} />
             </span>
@@ -868,7 +1024,11 @@ function ProfilePage({
   const [defaultCvUrl, setDefaultCvUrl] = useState(profile.defaultCvUrl)
 
   const [companyName, setCompanyName] = useState(profile.companyName || profile.name)
-  const [companyArea, setCompanyArea] = useState(profile.companyArea || locations[1])
+  const [companyArea, setCompanyArea] = useState(
+    profile.companyArea && PROVINCES_63.includes(profile.companyArea)
+      ? profile.companyArea
+      : 'TP. Hồ Chí Minh',
+  )
   const [companyAddress, setCompanyAddress] = useState(profile.companyAddress)
   const [companyDescription, setCompanyDescription] = useState(profile.companyDescription)
 
@@ -883,7 +1043,11 @@ function ProfilePage({
     setDefaultCvName(profile.defaultCvName)
     setDefaultCvUrl(profile.defaultCvUrl)
     setCompanyName(profile.companyName || profile.name)
-    setCompanyArea(profile.companyArea || locations[1])
+    setCompanyArea(
+      profile.companyArea && PROVINCES_63.includes(profile.companyArea)
+        ? profile.companyArea
+        : 'TP. Hồ Chí Minh',
+    )
     setCompanyAddress(profile.companyAddress)
     setCompanyDescription(profile.companyDescription)
   }, [profile.email])
@@ -933,7 +1097,7 @@ function ProfilePage({
         title={isEmployer ? 'Thông tin đơn vị tuyển dụng.' : 'Hồ sơ cá nhân của bạn.'}
         copy={
           isEmployer
-            ? 'Cập nhật thông tin doanh nghiệp / cửa hàng và địa chỉ làm việc để tự động điền khi đăng tin.'
+            ? 'Cập nhật thông tin doanh nghiệp / cửa hàng và tỉnh thành làm việc để tự động điền khi đăng tin.'
             : 'Cập nhật thông tin cá nhân, lời giới thiệu và CV / ảnh hồ sơ để ứng tuyển nhanh chóng.'
         }
       />
@@ -960,7 +1124,7 @@ function ProfilePage({
                   <input
                     value={companyName}
                     onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="Ví dụ: The Coffee House - Chi nhánh Quận 1"
+                    placeholder="Ví dụ: The Coffee House - Chi nhánh Hoàn Kiếm"
                     required
                   />
                 </label>
@@ -982,10 +1146,12 @@ function ProfilePage({
                   />
                 </label>
                 <label>
-                  Khu vực mặc định
+                  Tỉnh / Thành phố mặc định
                   <select value={companyArea} onChange={(e) => setCompanyArea(e.target.value)}>
-                    {locations.slice(1).map((loc) => (
-                      <option key={loc}>{loc}</option>
+                    {PROVINCES_63.map((loc) => (
+                      <option key={loc} value={loc}>
+                        {loc}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -994,7 +1160,7 @@ function ProfilePage({
                   <input
                     value={companyAddress}
                     onChange={(e) => setCompanyAddress(e.target.value)}
-                    placeholder="Ví dụ: 86 Cao Thắng, Quận 1, TP.HCM"
+                    placeholder="Ví dụ: 86 Cao Thắng, Quận 1"
                   />
                 </label>
                 <label className="full">
@@ -1109,7 +1275,7 @@ function ProfilePage({
             <strong>{phone || 'Chưa cập nhật SĐT'}</strong>
             {isEmployer ? (
               <>
-                <p>Khu vực: {companyArea}, TP.HCM</p>
+                <p>Tỉnh / Thành phố: {companyArea}</p>
                 <p>{companyAddress || 'Chưa cập nhật địa chỉ chi tiết'}</p>
                 <p>{companyDescription || 'Chưa có mô tả đơn vị.'}</p>
               </>
@@ -2157,9 +2323,9 @@ function PostJob({
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState('F&B / Phục vụ')
   const [location, setLocation] = useState(
-    defaultLocation && locations.slice(1).includes(defaultLocation)
+    defaultLocation && PROVINCES_63.includes(defaultLocation)
       ? defaultLocation
-      : locations[1],
+      : 'TP. Hồ Chí Minh',
   )
   const [streetAddress, setStreetAddress] = useState(defaultAddress || '')
   const [pay, setPay] = useState('')
@@ -2174,9 +2340,9 @@ function PostJob({
     setTitle('')
     setCategory('F&B / Phục vụ')
     setLocation(
-      defaultLocation && locations.slice(1).includes(defaultLocation)
+      defaultLocation && PROVINCES_63.includes(defaultLocation)
         ? defaultLocation
-        : locations[1],
+        : 'TP. Hồ Chí Minh',
     )
     setStreetAddress(defaultAddress || '')
     setPay('')
@@ -2186,8 +2352,8 @@ function PostJob({
   }
 
   const previewPlace = streetAddress.trim()
-    ? `${streetAddress.trim()}, ${location}, TP.HCM`
-    : `${location}, TP.HCM`
+    ? `${streetAddress.trim()}, ${location}`
+    : location
 
   return (
     <main>
@@ -2262,14 +2428,16 @@ function PostJob({
               </select>
             </label>
             <label>
-              Khu vực
+              Tỉnh / Thành phố (63 tỉnh thành)
               <select
                 name="location"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
               >
-                {locations.slice(1).map((loc) => (
-                  <option key={loc}>{loc}</option>
+                {PROVINCES_63.map((loc) => (
+                  <option key={loc} value={loc}>
+                    {loc}
+                  </option>
                 ))}
               </select>
             </label>
@@ -2284,12 +2452,12 @@ function PostJob({
               />
             </label>
             <label className="full">
-              Địa chỉ
+              Địa chỉ cụ thể (Số nhà, đường, quận/huyện/phường)
               <input
                 name="streetAddress"
                 value={streetAddress}
                 onChange={(e) => setStreetAddress(e.target.value)}
-                placeholder="Ví dụ: 123 Nguyễn Huệ hoặc 45 Đặng Văn Bi"
+                placeholder="Ví dụ: 123 Nguyễn Huệ, Quận 1 hoặc 45 Lê Lợi, TP. Huế"
                 required
               />
             </label>
@@ -2348,7 +2516,7 @@ function PostJob({
           <div className="posting-tip">
             <h2>Một tin rõ ràng tạo khác biệt.</h2>
             <p>01 Minh bạch về mức lương.</p>
-            <p>02 Nêu chính xác khu vực, địa chỉ và thời gian.</p>
+            <p>02 Nêu chính xác tỉnh/thành phố, địa chỉ và thời gian.</p>
             <p>03 Cho sinh viên biết họ sẽ làm gì.</p>
           </div>
         </aside>
@@ -3590,7 +3758,7 @@ function Admin({
           <p>
             <strong>Mức lương:</strong> {inspectedJob.pay} · <strong>Ngành nghề:</strong>{' '}
             {inspectedJob.category || 'Đa ngành nghề'} · <strong>Địa điểm:</strong>{' '}
-            {inspectedJob.place || 'TP.HCM'}
+            {inspectedJob.place || 'Việt Nam'}
           </p>
           <p>
             <strong>Lịch làm việc:</strong> {inspectedJob.schedule || 'Linh hoạt'}
@@ -3622,7 +3790,7 @@ function Admin({
                 <span>{job.company}</span>
                 <h3>{job.title}</h3>
                 <p>
-                  {job.pay} · {job.category || 'Đa ngành nghề'} · {job.place || 'TP.HCM'}
+                  {job.pay} · {job.category || 'Đa ngành nghề'} · {job.place || 'Việt Nam'}
                 </p>
               </div>
               <span className="status review">{job.status}</span>
@@ -4041,7 +4209,7 @@ export default function App({
     defaultCvName: '',
     defaultCvUrl: '',
     companyName: initialUserName || 'Đơn vị tuyển dụng đối tác',
-    companyArea: 'Quận 1',
+    companyArea: 'TP. Hồ Chí Minh',
     companyAddress: '',
     companyDescription: '',
     isProfileCompleted: false,
@@ -4085,6 +4253,15 @@ export default function App({
           return [...result.data.approvedJobs, ...staticSeedJobs]
         })
       }
+
+      const savedSession = readPersistedSession()
+      if (savedSession?.email && savedSession?.password) {
+        const savedPage = readPersistedPage()
+        await login(savedSession.email, savedSession.password, {
+          restoredPage: savedPage,
+          skipPersistOverwrite: true,
+        })
+      }
     })()
   }, [])
 
@@ -4116,16 +4293,25 @@ export default function App({
     }
   }
 
-  const go = (next: Page) => {
+  const canAccessPage = (next: Page, currentAuth: AuthRole) => {
     const protectedStudent: Page[] = ['applications', 'saved']
     const protectedEmployer: Page[] = ['employer', 'post-job', 'candidates']
     const protectedSignedIn: Page[] = ['profile']
     if (
-      (protectedStudent.includes(next) && auth !== 'student') ||
-      (protectedEmployer.includes(next) && auth !== 'employer') ||
-      (protectedSignedIn.includes(next) && auth !== 'student' && auth !== 'employer') ||
-      (next.startsWith('admin') && auth !== 'admin')
+      (protectedStudent.includes(next) && currentAuth !== 'student') ||
+      (protectedEmployer.includes(next) && currentAuth !== 'employer') ||
+      (protectedSignedIn.includes(next) &&
+        currentAuth !== 'student' &&
+        currentAuth !== 'employer') ||
+      (next.startsWith('admin') && currentAuth !== 'admin')
     ) {
+      return false
+    }
+    return true
+  }
+
+  const go = (next: Page) => {
+    if (!canAccessPage(next, auth)) {
       setPage('login')
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
@@ -4134,6 +4320,9 @@ export default function App({
       setReturnToPage(null)
     }
     setPage(next)
+    if (auth !== 'guest') {
+      writePersistedPage(next)
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' })
     if (auth !== 'guest' && next !== 'profile') {
       void syncDataFromSession()
@@ -4173,7 +4362,11 @@ export default function App({
     await syncDataFromSession()
   }
 
-  const login = async (email: string, password: string) => {
+  const login = async (
+    email: string,
+    password: string,
+    options?: { restoredPage?: Page | null; skipPersistOverwrite?: boolean },
+  ) => {
     const emailLower = email.trim().toLowerCase()
     let storedUser: { name?: string; role?: AuthRole } = {}
     try {
@@ -4192,13 +4385,27 @@ export default function App({
       password,
       fallbackName: storedUser.name,
     })
-    if (!result.ok) return result.error
+    if (!result.ok) {
+      if (options?.skipPersistOverwrite) {
+        writePersistedSession(null)
+      }
+      return result.error
+    }
 
     const role = (storedUser.role || result.data?.role) as AuthRole
     const resolvedName = storedUser.name || result.data?.name || ''
     setAuth(role)
     setUserName(resolvedName)
     setReturnToPage(null)
+
+    if (!options?.skipPersistOverwrite) {
+      writePersistedSession({
+        email: emailLower,
+        password,
+        name: resolvedName,
+        role,
+      })
+    }
 
     if (result.data?.profile) {
       setProfileData({
@@ -4244,12 +4451,20 @@ export default function App({
       }
     }
 
-    setPage(role === 'employer' ? 'employer' : role === 'admin' ? 'admin' : 'jobs')
+    const defaultRolePage: Page =
+      role === 'employer' ? 'employer' : role === 'admin' ? 'admin' : 'jobs'
+    const targetPage: Page =
+      options?.restoredPage && canAccessPage(options.restoredPage, role)
+        ? options.restoredPage
+        : defaultRolePage
+    setPage(targetPage)
+    writePersistedPage(targetPage)
     return null
   }
 
   const logout = async () => {
     await logoutAction()
+    writePersistedSession(null)
     setAuth('guest')
     setPage('jobs')
     setReturnToPage(null)
@@ -4425,7 +4640,7 @@ export default function App({
       {page === 'forgot-password' && <ForgotPassword go={go} />}
       {page === 'login' && (
         <Login
-          onLogin={login}
+          onLogin={(email, password) => login(email, password)}
           go={go}
           hasPendingVerification={Boolean(pendingVerification)}
         />
