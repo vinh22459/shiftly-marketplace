@@ -736,6 +736,7 @@ function FindJobs({
     const normalize = (str: string) =>
       str
         .toLowerCase()
+        .replace(/tp\.?\s*hồ chí minh|tp\.?\s*hcm|tphcm/g, 'ho chi minh')
         .replace(/tp\.?\s*/g, '')
         .replace(/thành phố\s*/g, '')
         .replace(/tỉnh\s*/g, '')
