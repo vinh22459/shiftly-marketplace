@@ -945,11 +945,12 @@ export async function signupAction(input: {
   companyName?: string
 }): Promise<ActionResult<VerificationPendingData>> {
   if (!input.name?.trim() || !input.email?.trim() || !input.password) {
-    return { ok: false, error: 'Vui lòng điền đầy đủ họ tên, Gmail và mật khẩu.' }
+    return { ok: false, error: 'Vui lòng điền đầy đủ họ tên, email và mật khẩu.' }
   }
   const emailLower = input.email.trim().toLowerCase()
-  if (!emailLower.endsWith('@gmail.com')) {
-    return { ok: false, error: 'Vui lòng nhập địa chỉ Gmail hợp lệ (@gmail.com) để nhận mã xác thực.' }
+  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLower)
+  if (!isValidEmail) {
+    return { ok: false, error: 'Vui lòng nhập địa chỉ email hợp lệ để nhận mã xác thực.' }
   }
 
   const role: 'student' | 'employer' = input.role === 'employer' ? 'employer' : 'student'
