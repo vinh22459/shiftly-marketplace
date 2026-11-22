@@ -2948,7 +2948,6 @@ function Signup({
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Tạo mật khẩu an toàn"
           />
-          <small>Ít nhất 8 ký tự, bao gồm một chữ số.</small>
         </label>
         <label className="terms">
           <input
