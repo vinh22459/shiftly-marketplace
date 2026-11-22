@@ -612,10 +612,11 @@ async function dispatchVerificationEmail(
   const gmailAppPassword = process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, '').trim()
 
   if (!gmailUser || !gmailAppPassword) {
-    console.warn('[SHIFTLY] Thiếu GMAIL_USER hoặc GMAIL_APP_PASSWORD trong .env')
+    console.warn('[SHIFTLY] Thiếu GMAIL_USER hoặc GMAIL_APP_PASSWORD trong biến môi trường')
     return {
       sent: false,
-      error: 'Chưa cấu hình GMAIL_USER và GMAIL_APP_PASSWORD trong file .env.',
+      error:
+        'Chưa cấu hình GMAIL_USER và GMAIL_APP_PASSWORD trong biến môi trường (Vercel / .env).',
     }
   }
 
@@ -623,7 +624,7 @@ async function dispatchVerificationEmail(
   const subject = isReset
     ? `[Shiftly] Mã OTP đặt lại mật khẩu của bạn là ${code}`
     : `[Shiftly] Mã xác thực OTP của bạn là ${code}`
-  const heading = isReset ? 'Khôi phục mật khẩu - Shiftly' : 'Xác thực tài khoản Gmail - Shiftly'
+  const heading = isReset ? 'Khôi phục mật khẩu - Shiftly' : 'Xác thực tài khoản email - Shiftly'
   const introText = isReset
     ? 'Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản <strong>Shiftly</strong> của bạn. Vui lòng nhập mã OTP 6 chữ số bên dưới để tạo mật khẩu mới:'
     : 'Cảm ơn bạn đã đăng ký tài khoản trên <strong>Shiftly</strong>. Vui lòng nhập mã OTP 6 chữ số bên dưới để hoàn tất xác thực:'
@@ -657,7 +658,8 @@ async function dispatchVerificationEmail(
     console.error('[SHIFTLY GMAIL SMTP ERROR]', err)
     return {
       sent: false,
-      error: 'Không thể gửi email qua Gmail SMTP. Kiểm tra lại GMAIL_USER và App Password trong .env.',
+      error:
+        'Không thể gửi email qua Gmail SMTP. Kiểm tra lại GMAIL_USER và App Password trên Vercel / .env.',
     }
   }
 }
@@ -787,7 +789,8 @@ export async function loginAction(input: {
   if (existingProfile && existingProfile.emailVerified === false) {
     return {
       ok: false,
-      error: 'Gmail này chưa được xác thực. Vui lòng nhập mã xác thực gửi về Gmail trước khi đăng nhập.',
+      error:
+        'Email này chưa được xác thực. Vui lòng nhập mã xác thực gửi về email của bạn trước khi đăng nhập.',
     }
   }
 
@@ -961,7 +964,7 @@ export async function signupAction(input: {
   const code = String(Math.floor(100000 + Math.random() * 900000))
   const mailResult = await dispatchVerificationEmail(emailLower, displayName, code, 'signup')
   if (!mailResult.sent) {
-    return { ok: false, error: mailResult.error || 'Gửi mã OTP về Gmail thất bại.' }
+    return { ok: false, error: mailResult.error || 'Gửi mã OTP về email thất bại.' }
   }
 
   const freshProfile: UserProfileData = {
@@ -1022,7 +1025,7 @@ export async function signupAction(input: {
     code,
     expiresAt: Date.now() + 15 * 60 * 1000,
     sentViaEmail: true,
-    previewHint: `Mã xác thực OTP 6 chữ số đã được gửi tới hộp thư ${emailLower}. Vui lòng mở Gmail (kiểm tra cả mục Quảng cáo / Spam) để lấy mã.`,
+    previewHint: `Mã xác thực OTP 6 chữ số đã được gửi tới hộp thư ${emailLower}. Vui lòng kiểm tra hộp thư đến (cả mục Quảng cáo / Spam) để lấy mã.`,
   }
 
   store.pendingVerificationsByEmail[emailLower] = verificationData
@@ -1039,7 +1042,7 @@ export async function verifyEmailCodeAction(input: {
   const pending = store.pendingVerificationsByEmail?.[emailLower]
 
   if (!pending) {
-    return { ok: false, error: 'Không tìm thấy yêu cầu xác thực cho Gmail này.' }
+    return { ok: false, error: 'Không tìm thấy yêu cầu xác thực cho email này.' }
   }
   if (Date.now() > pending.expiresAt) {
     return { ok: false, error: 'Mã xác thực đã hết hạn. Vui lòng bấm Gửi lại mã.' }
@@ -1062,12 +1065,12 @@ export async function resendVerificationCodeAction(
   const emailLower = email.trim().toLowerCase()
   const profile = mockProfilesByEmail[emailLower]
   if (!profile) {
-    return { ok: false, error: 'Không tìm thấy tài khoản Gmail tương ứng.' }
+    return { ok: false, error: 'Không tìm thấy tài khoản tương ứng với email này.' }
   }
   const code = String(Math.floor(100000 + Math.random() * 900000))
   const mailResult = await dispatchVerificationEmail(emailLower, profile.name, code, 'signup')
   if (!mailResult.sent) {
-    return { ok: false, error: mailResult.error || 'Không thể gửi lại mã OTP về Gmail.' }
+    return { ok: false, error: mailResult.error || 'Không thể gửi lại mã OTP về email.' }
   }
 
   const verificationData: VerificationPendingData = {
@@ -1075,7 +1078,7 @@ export async function resendVerificationCodeAction(
     code,
     expiresAt: Date.now() + 15 * 60 * 1000,
     sentViaEmail: true,
-    previewHint: `Đã gửi lại mã xác thực OTP mới tới hộp thư ${emailLower}. Vui lòng kiểm tra Gmail.`,
+    previewHint: `Đã gửi lại mã xác thực OTP mới tới hộp thư ${emailLower}. Vui lòng kiểm tra hộp thư đến (cả mục Quảng cáo / Spam).`,
   }
   store.pendingVerificationsByEmail[emailLower] = verificationData
   return { ok: true, data: verificationData }
@@ -1107,7 +1110,7 @@ export async function requestPasswordResetAction(
   if (!mailResult.sent) {
     return {
       ok: false,
-      error: mailResult.error || 'Không thể gửi mã OTP khôi phục mật khẩu về Gmail.',
+      error: mailResult.error || 'Không thể gửi mã OTP khôi phục mật khẩu về email.',
     }
   }
 
@@ -1116,7 +1119,7 @@ export async function requestPasswordResetAction(
     code,
     expiresAt: Date.now() + 15 * 60 * 1000,
     sentViaEmail: true,
-    previewHint: `Mã OTP khôi phục mật khẩu (6 chữ số) đã được gửi tới ${emailLower}. Vui lòng kiểm tra hộp thư Gmail (kể cả mục Quảng cáo / Spam).`,
+    previewHint: `Mã OTP khôi phục mật khẩu (6 chữ số) đã được gửi tới ${emailLower}. Vui lòng kiểm tra hộp thư đến (cả mục Quảng cáo / Spam).`,
   }
 
   store.pendingVerificationsByEmail[`reset:${emailLower}`] = resetData
