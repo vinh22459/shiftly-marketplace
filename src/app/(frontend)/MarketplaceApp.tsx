@@ -3917,12 +3917,6 @@ function Login({
           Bắt đầu bước tiếp theo.
         </h1>
         <p>Theo dõi đơn ứng tuyển, quản lý công việc và kết nối với đúng người.</p>
-        <div className="demo-accounts">
-          <strong>Tài khoản dùng thử</strong>
-          <p>Sinh viên: sv@gmail.com / 123</p>
-          <p>Nhà tuyển dụng: ntd@gmail.com / 123</p>
-          <p>Quản trị viên: admin@gmail.com / 123</p>
-        </div>
       </section>
       <form className="login-form" onSubmit={submit}>
         <span>CHÀO MỪNG TRỞ LẠI</span>
