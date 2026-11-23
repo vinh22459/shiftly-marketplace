@@ -234,7 +234,54 @@ async function dispatchVerificationEmail(
     };
   }
 }
+async function dispatchHiredEmail(params: {
+  studentEmail: string;
+  studentName: string;
+  jobTitle: string;
+  companyName: string;
+  pay: string;
+  place: string;
+  schedule: string;
+}): Promise<void> {
+  const gmailUser = process.env.GMAIL_USER?.trim();
+  const gmailAppPassword = process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, '').trim();
 
+  if (!gmailUser || !gmailAppPassword || !params.studentEmail) {
+    return;
+  }
+
+  try {
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: gmailUser,
+        pass: gmailAppPassword,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"Shiftly" <${gmailUser}>`,
+      to: params.studentEmail,
+      subject: `[Shiftly] Chúc mừng! Bạn đã trúng tuyển vị trí ${params.jobTitle}`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:10px;line-height:1.6;color:#141715;">
+        <h2 style="color:#114232;margin-top:0;">Chúc mừng bạn đã trúng tuyển!</h2>
+        <p>Xin chào <strong>${params.studentName}</strong>,</p>
+        <p>Nhà tuyển dụng <strong>${params.companyName}</strong> đã duyệt hồ sơ và chính thức nhận bạn vào vị trí:</p>
+        <div style="margin:18px 0;padding:16px;background:#eff6f1;border-left:4px solid #114232;border-radius:6px;">
+          <p style="margin:0 0 8px 0;font-size:16px;font-weight:700;color:#114232;">${params.jobTitle}</p>
+          <p style="margin:4px 0;font-size:14px;"><strong>Đơn vị tuyển dụng:</strong> ${params.companyName}</p>
+          <p style="margin:4px 0;font-size:14px;"><strong>Mức lương:</strong> ${params.pay}</p>
+          <p style="margin:4px 0;font-size:14px;"><strong>Ca làm việc:</strong> ${params.schedule}</p>
+          <p style="margin:4px 0;font-size:14px;"><strong>Địa điểm:</strong> ${params.place}</p>
+        </div>
+        <p>Vui lòng đăng nhập vào hệ thống <strong>Shiftly</strong> (mục <em>Đơn ứng tuyển</em>) để theo dõi chi tiết và chuẩn bị nhận việc.</p>
+        <p style="font-size:13px;color:#5c6660;margin-bottom:0;">Trân trọng,<br/>Đội ngũ Shiftly</p>
+      </div>`,
+    });
+  } catch (err) {
+    console.error('[SHIFTLY HIRED EMAIL ERROR]', err);
+  }
+}
 async function pushNotification(
   targetEmail: string,
   payload: Omit<NotificationItem, 'id' | 'read' | 'date'>,
@@ -1136,6 +1183,15 @@ export async function updateApplicationStatusAction(input: {
         title: 'Chúc mừng! Bạn đã được nhận việc',
         message: `${app.company_name} đã duyệt hồ sơ và nhận bạn vào vị trí "${app.job_title}".`,
         targetPage: 'applications',
+      });
+      await dispatchHiredEmail({
+        studentEmail: app.student_email,
+        studentName: app.student_name,
+        jobTitle: app.job_title,
+        companyName: app.company_name,
+        pay: app.pay,
+        place: app.place,
+        schedule: app.schedule,
       });
     } else if (input.status === 'rejected') {
       await pushNotification(app.student_email, {
