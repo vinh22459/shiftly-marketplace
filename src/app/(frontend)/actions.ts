@@ -1,70 +1,77 @@
-'use server'
+'use server';
 
-import nodemailer from 'nodemailer'
+import { cookies } from 'next/headers';
+import nodemailer from 'nodemailer';
+import { sql } from '../../lib/db';
 
 type ActionResult<T = undefined> =
   | { ok: true; data?: T; error?: string; fields?: Record<string, string> }
-  | { ok: false; error: string; fields?: Record<string, string> }
+  | { ok: false; error: string; fields?: Record<string, string> };
 
 export type PendingModerationJob = {
-  id: string
-  title: string
-  company: string
-  pay: string
-  hourlyRate: number
-  place: string
-  schedule: string
-  category: string
-  posted: string
-  description: string
-  requirements: string
-  openings: number
-  status: 'Chờ duyệt' | 'Đã duyệt' | 'Từ chối'
-}
+  id: string;
+  title: string;
+  company: string;
+  pay: string;
+  hourlyRate: number;
+  place: string;
+  schedule: string;
+  category: string;
+  posted: string;
+  description: string;
+  requirements: string;
+  openings: number;
+  status: 'Chờ duyệt' | 'Đã duyệt' | 'Từ chối';
+};
 
 export type ReviewData = {
-  id?: string
-  rating: number
-  comment: string
-  date: string
-  reviewerName: string
-  moderationStatus?: 'pending' | 'approved' | 'hidden'
-}
+  id?: string;
+  rating: number;
+  comment: string;
+  date: string;
+  reviewerName: string;
+  moderationStatus?: 'pending' | 'approved' | 'hidden';
+};
 
 export type NotificationItem = {
-  id: string
-  title: string
-  message: string
-  read: boolean
-  date: string
-  targetPage?: 'applications' | 'candidates' | 'employer' | 'post-job' | 'jobs'
-}
+  id: string;
+  title: string;
+  message: string;
+  read: boolean;
+  date: string;
+  targetPage?: 'applications' | 'candidates' | 'employer' | 'post-job' | 'jobs';
+};
 
 export type VerificationPendingData = {
-  email: string
-  code: string
-  expiresAt: number
-  sentViaEmail: boolean
-  previewHint: string
-}
+  email: string;
+  code: string;
+  expiresAt: number;
+  sentViaEmail: boolean;
+  previewHint: string;
+};
 
 export type UserProfileData = {
-  name: string
-  email: string
-  role: 'student' | 'employer' | 'admin'
-  phone: string
-  school: string
-  major: string
-  bio: string
-  defaultCvName: string
-  defaultCvUrl: string
-  companyName: string
-  companyArea: string
-  companyAddress: string
-  companyDescription: string
-  isProfileCompleted?: boolean
-  emailVerified?: boolean
-}
+  name: string;
+  email: string;
+  role: 'student' | 'employer' | 'admin';
+  phone: string;
+  school: string;
+  major: string;
+  bio: string;
+  defaultCvName: string;
+  defaultCvUrl: string;
+  companyName: string;
+  companyArea: string;
+  companyAddress: string;
+  companyDescription: string;
+  isProfileCompleted?: boolean;
+  emailVerified?: boolean;
+};
+
+const SESSION_COOKIE_NAME = 'shiftly_user_email';
+const DEFAULT_SESSION_EMAIL = 'vinh@vanlang.edu.vn';
+const DEMO_STUDENT_EMAILS = ['vinh@vanlang.edu.vn', 'sv@gmail.com'];
+const DEMO_EMPLOYER_EMAILS = ['hr@doitac.vn', 'ntd@gmail.com'];
 
 const SAMPLE_CV_PDF_DATA_URL =
   'data:application/pdf;base64,' +
@@ -101,866 +108,70 @@ startxref
 531
 %%EOF`,
     'utf-8',
-  ).toString('base64')
+  ).toString('base64');
 
-const DEMO_STUDENT_EMAILS = ['vinh@vanlang.edu.vn', 'sv@gmail.com']
-const DEMO_EMPLOYER_EMAILS = ['hr@doitac.vn', 'ntd@gmail.com']
-const DEMO_ACCOUNTS = ['sv@gmail.com', 'ntd@gmail.com', 'admin@gmail.com']
+function mapUserRowToProfile(row: Record<string, any>): UserProfileData {
+  const defaultCvName = row.default_cv_name || '';
+  const defaultCvUrl =
+    row.default_cv_url ||
+    (defaultCvName === 'CV_NguyenVanVinh.pdf' ? SAMPLE_CV_PDF_DATA_URL : '');
 
-type EmployerJobItem = {
-  id: string
-  company: string
-  employerEmail?: string
-  title: string
-  pay: string
-  hourlyRate: number
-  place: string
-  schedule: string
-  category: string
-  posted: string
-  description: string
-  requirements: string
-  status: 'recruiting' | 'paused' | 'filled' | 'completed'
-  moderationStatus: 'pending' | 'approved' | 'rejected'
-  openings: number
-  applicationCount: number
+  return {
+    name: row.name,
+    email: row.email,
+    role: row.role as 'student' | 'employer' | 'admin',
+    phone: row.phone || '',
+    school: row.school || '',
+    major: row.major || '',
+    bio: row.bio || '',
+    defaultCvName,
+    defaultCvUrl,
+    companyName: row.company_name || '',
+    companyArea: row.company_area || 'Quận 1',
+    companyAddress: row.company_address || '',
+    companyDescription: row.company_description || '',
+    isProfileCompleted: Boolean(row.is_profile_completed),
+    emailVerified: Boolean(row.email_verified),
+  };
 }
 
-type MockStore = {
-  profilesByEmail: Record<string, UserProfileData>
-  passwordsByEmail: Record<string, string>
-  pendingVerificationsByEmail: Record<string, VerificationPendingData>
-  currentUser: UserProfileData
-  applications: Array<{
-    id: string
-    jobId: string
-    title: string
-    company: string
-    employerEmail?: string
-    date: string
-    status: 'pending' | 'hired' | 'rejected' | 'completed'
-    studentEmail: string
-    studentName: string
-    studentSchool: string
-    introduction: string
-    pay: string
-    place: string
-    schedule: string
-    openings: number
-    hasCV: boolean
-    cvName?: string
-    cvUrl?: string
-    employerReview?: ReviewData
-    studentReview?: ReviewData
-  }>
-  savedJobsByEmail: Record<string, Array<{ id: string; jobId: string }>>
-  notificationsByEmail: Record<string, Array<NotificationItem>>
-  employerJobs: EmployerJobItem[]
-  adminUsers: Array<{
-    id: string
-    name: string
-    email: string
-    role: 'student' | 'employer' | 'admin'
-    active: boolean
-  }>
-  adminJobs: Array<PendingModerationJob>
-  adminReviews: Array<{
-    id: string
-    applicationId?: string
-    reviewType?: 'employer-to-student' | 'student-to-employer'
-    author: string
-    target: string
-    rating: number
-    content: string
-    status: string
-  }>
-}
+async function getCurrentSessionUser(): Promise<UserProfileData> {
+  const cookieStore = await cookies();
+  const savedEmail = cookieStore.get(SESSION_COOKIE_NAME)?.value?.trim().toLowerCase();
+  const targetEmail = savedEmail || DEFAULT_SESSION_EMAIL;
 
-const DEFAULT_PASSWORDS: Record<string, string> = {
-  'vinh@vanlang.edu.vn': '123',
-  'sv@gmail.com': '123',
-  'ntd@gmail.com': '123',
-  'admin@gmail.com': '123',
-  'hr@doitac.vn': '123',
-}
-
-const globalForShiftly = globalThis as unknown as { __shiftlyMockStore?: MockStore }
-
-if (!globalForShiftly.__shiftlyMockStore) {
-  const initialProfiles: Record<string, UserProfileData> = {
-    'vinh@vanlang.edu.vn': {
-      role: 'student',
-      name: 'Nguyễn Văn Vinh',
-      email: 'vinh@vanlang.edu.vn',
-      phone: '0901 234 567',
-      school: '',
-      major: '',
-      bio: 'Sinh viên năng động, đúng giờ, có thể làm linh hoạt các buổi sáng, chiều hoặc cuối tuần và sẵn sàng học hỏi nhanh.',
-      defaultCvName: 'CV_NguyenVanVinh.pdf',
-      defaultCvUrl: SAMPLE_CV_PDF_DATA_URL,
-      companyName: 'Đơn vị tuyển dụng đối tác',
-      companyArea: 'Quận 1',
-      companyAddress: '86 Cao Thắng, Quận 1, TP.HCM',
-      companyDescription:
-        'Đơn vị tuyển dụng bán thời gian thân thiện, hỗ trợ sinh viên sắp xếp lịch làm linh hoạt.',
-      isProfileCompleted: true,
-      emailVerified: true,
-    },
-    'sv@gmail.com': {
-      role: 'student',
-      name: 'Nguyễn Văn Vinh',
-      email: 'sv@gmail.com',
-      phone: '0901 234 567',
-      school: '',
-      major: '',
-      bio: 'Sinh viên năng động, đúng giờ, có thể làm linh hoạt các buổi sáng, chiều hoặc cuối tuần và sẵn sàng học hỏi nhanh.',
-      defaultCvName: 'CV_NguyenVanVinh.pdf',
-      defaultCvUrl: SAMPLE_CV_PDF_DATA_URL,
-      companyName: 'Đơn vị tuyển dụng đối tác',
-      companyArea: 'Quận 1',
-      companyAddress: '86 Cao Thắng, Quận 1, TP.HCM',
-      companyDescription:
-        'Đơn vị tuyển dụng bán thời gian thân thiện, hỗ trợ sinh viên sắp xếp lịch làm linh hoạt.',
-      isProfileCompleted: true,
-      emailVerified: true,
-    },
-    'ntd@gmail.com': {
-      role: 'employer',
-      name: 'Đơn vị tuyển dụng đối tác',
-      email: 'ntd@gmail.com',
-      phone: '0909 123 456',
-      school: '',
-      major: '',
-      bio: '',
-      defaultCvName: '',
-      defaultCvUrl: '',
-      companyName: 'Đơn vị tuyển dụng đối tác',
-      companyArea: 'Quận 1',
-      companyAddress: '86 Cao Thắng, Quận 1, TP.HCM',
-      companyDescription:
-        'Đơn vị tuyển dụng bán thời gian thân thiện, hỗ trợ sinh viên sắp xếp lịch làm linh hoạt.',
-      isProfileCompleted: true,
-      emailVerified: true,
-    },
-    'admin@gmail.com': {
-      role: 'admin',
-      name: 'Quản trị viên hệ thống',
-      email: 'admin@gmail.com',
-      phone: '',
-      school: '',
-      major: '',
-      bio: '',
-      defaultCvName: '',
-      defaultCvUrl: '',
-      companyName: '',
-      companyArea: 'Quận 1',
-      companyAddress: '',
-      companyDescription: '',
-      isProfileCompleted: true,
-      emailVerified: true,
-    },
-    'hr@doitac.vn': {
-      role: 'employer',
-      name: 'Đơn vị tuyển dụng đối tác',
-      email: 'hr@doitac.vn',
-      phone: '0909 123 456',
-      school: '',
-      major: '',
-      bio: '',
-      defaultCvName: '',
-      defaultCvUrl: '',
-      companyName: 'Đơn vị tuyển dụng đối tác',
-      companyArea: 'Quận 1',
-      companyAddress: '86 Cao Thắng, Quận 1, TP.HCM',
-      companyDescription:
-        'Đơn vị tuyển dụng bán thời gian thân thiện, hỗ trợ sinh viên sắp xếp lịch làm linh hoạt.',
-      isProfileCompleted: true,
-      emailVerified: true,
-    },
+  const rows = await sql`
+    SELECT * FROM users WHERE LOWER(email) = ${targetEmail} LIMIT 1
+  `;
+  if (rows.length > 0) {
+    return mapUserRowToProfile(rows[0]);
   }
 
-  globalForShiftly.__shiftlyMockStore = {
-    profilesByEmail: initialProfiles,
-    passwordsByEmail: { ...DEFAULT_PASSWORDS },
-    pendingVerificationsByEmail: {},
-    currentUser: { ...initialProfiles['vinh@vanlang.edu.vn'] },
-    applications: [
-      {
-        id: 'app-1',
-        jobId: 'job-1',
-        title: 'Nhân viên Pha chế & Phục vụ Ca linh hoạt',
-        company: 'The Coffee House - Chi nhánh Quận 1',
-        employerEmail: 'ntd@gmail.com',
-        date: '20/11/2026',
-        status: 'pending',
-        studentEmail: 'vinh@vanlang.edu.vn',
-        studentName: 'Nguyễn Văn Vinh',
-        studentSchool: 'Sinh viên ứng tuyển',
-        introduction:
-          'Em có thể làm linh hoạt các buổi sáng và cuối tuần, giao tiếp tốt, nhiệt tình và có trách nhiệm với công việc.',
-        pay: '28–35K / giờ',
-        place: '86 Cao Thắng, Quận 1, TP.HCM',
-        schedule: 'Linh hoạt theo lịch học (20h/tuần)',
-        openings: 3,
-        hasCV: true,
-        cvName: 'CV_NguyenVanVinh.pdf',
-        cvUrl: SAMPLE_CV_PDF_DATA_URL,
-      },
-    ],
-    savedJobsByEmail: {
-      'vinh@vanlang.edu.vn': [{ id: 'saved-1', jobId: 'job-1' }],
-      'sv@gmail.com': [{ id: 'saved-1', jobId: 'job-1' }],
-    },
-    notificationsByEmail: {
-      'vinh@vanlang.edu.vn': [
-        {
-          id: 'notif-1',
-          title: 'Chào mừng bạn đến với shiftly',
-          message: 'Khám phá hàng trăm cơ hội việc làm bán thời gian đa ngành nghề phù hợp lịch học.',
-          read: false,
-          date: '20/11/2026',
-          targetPage: 'jobs',
-        },
-      ],
-      'sv@gmail.com': [
-        {
-          id: 'notif-1',
-          title: 'Chào mừng bạn đến với shiftly',
-          message: 'Khám phá hàng trăm cơ hội việc làm bán thời gian đa ngành nghề phù hợp lịch học.',
-          read: false,
-          date: '20/11/2026',
-          targetPage: 'jobs',
-        },
-      ],
-      'ntd@gmail.com': [
-        {
-          id: 'notif-emp-1',
-          title: 'Ứng viên mới ứng tuyển',
-          message: 'Nguyễn Văn Vinh vừa nộp hồ sơ cho vị trí Nhân viên Pha chế & Phục vụ Ca linh hoạt.',
-          read: false,
-          date: '20/11/2026',
-          targetPage: 'candidates',
-        },
-      ],
-      'hr@doitac.vn': [
-        {
-          id: 'notif-emp-1',
-          title: 'Ứng viên mới ứng tuyển',
-          message: 'Nguyễn Văn Vinh vừa nộp hồ sơ cho vị trí Nhân viên Pha chế & Phục vụ Ca linh hoạt.',
-          read: false,
-          date: '20/11/2026',
-          targetPage: 'candidates',
-        },
-      ],
-    },
-    employerJobs: [
-      {
-        id: 'job-1',
-        company: 'The Coffee House - Chi nhánh Quận 1',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Pha chế & Phục vụ Ca linh hoạt',
-        pay: '28–35K / giờ',
-        hourlyRate: 32,
-        place: '86 Cao Thắng, Quận 1, TP.HCM',
-        schedule: 'Xoay ca linh hoạt (Sáng / Chiều / Tối)',
-        category: 'F&B / Phục vụ',
-        posted: '20 thg 11, 2026',
-        description: 'Đón tiếp khách hàng, pha chế đồ uống theo công thức chuẩn và giữ vệ sinh quầy.',
-        requirements: 'Không yêu cầu kinh nghiệm, được đào tạo bài bản, đăng ký tối thiểu 4 ca/tuần.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 3,
-        applicationCount: 1,
-      },
-      {
-        id: 'job-2',
-        company: 'Highlands Coffee - Vincom Thủ Đức',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Thu ngân & Phục vụ Bàn Part-time',
-        pay: '27–33K / giờ',
-        hourlyRate: 30,
-        place: '216 Võ Văn Ngân, TP. Thủ Đức, TP.HCM',
-        schedule: 'Ca tối 17:00–22:00 hoặc cuối tuần',
-        category: 'F&B / Phục vụ',
-        posted: '20 thg 11, 2026',
-        description:
-          'Nhận order tại quầy, phục vụ đồ uống cho khách tại bàn và hỗ trợ dọn dẹp khu vực quán.',
-        requirements:
-          'Nhanh nhẹn, vui vẻ, hòa đồng, ưu tiên sinh viên khu vực Làng Đại học & Thủ Đức.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 4,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-3',
-        company: 'Hệ thống Bán lẻ Circle K - Quận 7',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Bán hàng & Thu ngân Cửa hàng tiện lợi',
-        pay: '26–32K / giờ',
-        hourlyRate: 29,
-        place: '142 Nguyễn Thị Thập, Quận 7, TP.HCM',
-        schedule: 'Ca chiều 14:00–22:00 hoặc xoay ca',
-        category: 'Bán hàng / Thu ngân',
-        posted: '20 thg 11, 2026',
-        description:
-          'Thanh toán hóa đơn tại quầy thu ngân, trưng bày hàng hóa lên kệ và hỗ trợ khách hàng.',
-        requirements: 'Trung thực, cẩn thận, nhanh nhẹn, ưu tiên sinh viên ở khu vực Quận 7.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 2,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-4',
-        company: 'Nhà sách Phương Nam - Quận 10',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Cộng tác viên Tư vấn Sách & Sắp xếp Quầy kệ',
-        pay: '28–34K / giờ',
-        hourlyRate: 31,
-        place: '52 Sư Vạn Hạnh, Quận 10, TP.HCM',
-        schedule: 'Sáng 8:00–12:00 hoặc Chiều 13:30–17:30',
-        category: 'Bán hàng / Thu ngân',
-        posted: '20 thg 11, 2026',
-        description:
-          'Tư vấn đầu sách cho khách hàng, kiểm kê văn phòng phẩm và giữ quầy sách gọn gàng.',
-        requirements: 'Yêu thích sách, giao tiếp nhẹ nhàng, lịch sự, làm tối thiểu 4 buổi/tuần.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 2,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-5',
-        company: 'Trung tâm Anh ngữ & Kỹ năng Horizon',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Trợ giảng Tiếng Anh Giao tiếp (Cuối tuần)',
-        pay: '45–60K / giờ',
-        hourlyRate: 52,
-        place: '315 Điện Biên Phủ, Quận Bình Thạnh, TP.HCM',
-        schedule: 'T7 & CN, 8:00–17:00',
-        category: 'Gia sư / Trợ giảng',
-        posted: '20 thg 11, 2026',
-        description: 'Hỗ trợ giảng viên bản ngữ trên lớp, điểm danh và kèm cặp học viên thực hành.',
-        requirements: 'Giao tiếp tiếng Anh khá, năng động, yêu thích môi trường giáo dục.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 2,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-6',
-        company: 'Học viện Toán Tư duy & Kỹ năng KidSmart',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Gia sư Kèm Toán & Báo bài Tiểu học (Ca tối)',
-        pay: '50–70K / giờ',
-        hourlyRate: 60,
-        place: '45 Nguyễn Đình Chiểu, Quận 1, TP.HCM',
-        schedule: 'T2–T6, 17:30–20:30',
-        category: 'Gia sư / Trợ giảng',
-        posted: '20 thg 11, 2026',
-        description:
-          'Hướng dẫn học sinh hoàn thành bài tập trên lớp, rèn luyện tư duy logic theo giáo trình.',
-        requirements: 'Kiên nhẫn, yêu trẻ nhỏ, phát âm chuẩn, điểm GPA khá trở lên.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 3,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-7',
-        company: 'Công ty Truyền thông & Sáng tạo Bloom Media',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Cộng tác viên Content Marketing & Thiết kế Canva',
-        pay: '40–55K / giờ',
-        hourlyRate: 48,
-        place: '18 Kha Vạn Cân, TP. Thủ Đức, TP.HCM',
-        schedule: 'Linh hoạt / Hybrid (20h/tuần)',
-        category: 'Marketing / Content',
-        posted: '20 thg 11, 2026',
-        description:
-          'Lên ý tưởng bài đăng fanpage, thiết kế ấn phẩm cơ bản và hỗ trợ chiến dịch truyền thông.',
-        requirements: 'Biết viết nội dung sáng tạo, sử dụng thành thạo Canva hoặc CapCut.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 2,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-8',
-        company: 'Studio Thời trang & Mỹ phẩm LUNA',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Mẫu ảnh & Hỗ trợ Quay TikTok / Livestream Bán hàng',
-        pay: '45–65K / giờ',
-        hourlyRate: 55,
-        place: '74 Cộng Hòa, Quận Tân Bình, TP.HCM',
-        schedule: '3–4 buổi/tuần (linh hoạt theo lịch trống)',
-        category: 'Marketing / Content',
-        posted: '20 thg 11, 2026',
-        description:
-          'Tham gia quay video ngắn review sản phẩm, hỗ trợ chuẩn bị đạo cụ và tương tác livestream.',
-        requirements: 'Tự tin trước ống kính, ăn nói lưu loát, bắt trend mạng xã hội tốt.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 2,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-9',
-        company: 'Trung tâm Hội nghị & Triển lãm SECC',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Lễ tân & Điều phối Sự kiện Cuối tuần',
-        pay: '38–50K / giờ',
-        hourlyRate: 44,
-        place: '799 Nguyễn Văn Linh, Quận 7, TP.HCM',
-        schedule: 'Theo lịch sự kiện T6–CN (7:30–16:30)',
-        category: 'Sự kiện / Lễ tân',
-        posted: '20 thg 11, 2026',
-        description:
-          'Check-in khách mời, hướng dẫn khu vực hội thảo và hỗ trợ ban tổ chức vận hành sự kiện.',
-        requirements:
-          'Ngoại hình sáng, giao tiếp lịch sự, đúng giờ và chịu được áp lực công việc sự kiện.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 5,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-10',
-        company: 'Kho Phân loại & Giao vận ExpressHub',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Cộng tác viên Phân loại & Đóng gói Đơn hàng',
-        pay: '30–38K / giờ',
-        hourlyRate: 34,
-        place: '280 Lý Thường Kiệt, Quận 10, TP.HCM',
-        schedule: 'Ca tối 18:00–22:00 hoặc sáng 7:00–11:00',
-        category: 'Kho vận / Giao nhận',
-        posted: '20 thg 11, 2026',
-        description:
-          'Quét mã vạch, phân loại bưu kiện theo tuyến quận và kiểm tra tem nhãn trước khi xuất kho.',
-        requirements: 'Sức khỏe tốt, cẩn thận, thao tác nhanh, không yêu cầu kinh nghiệm.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 4,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-11',
-        company: 'The Coffee House - Chi nhánh Hoàn Kiếm',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Pha chế & Phục vụ Ca linh hoạt',
-        pay: '28–35K / giờ',
-        hourlyRate: 32,
-        place: '23 Hai Bà Trưng, Hà Nội',
-        schedule: 'Xoay ca linh hoạt (Sáng / Chiều / Tối)',
-        category: 'F&B / Phục vụ',
-        posted: '21 thg 11, 2026',
-        description: 'Pha chế đồ uống theo công thức chuẩn, tư vấn menu và giữ vệ sinh quầy.',
-        requirements: 'Nhanh nhẹn, giao tiếp tốt, có thể làm tối thiểu 4 ca/tuần.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 3,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-12',
-        company: 'Khách sạn & Resort Biển Xanh Đà Nẵng',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Lễ tân & Đón tiếp Khách Du lịch',
-        pay: '35–45K / giờ',
-        hourlyRate: 40,
-        place: '120 Võ Nguyên Giáp, Đà Nẵng',
-        schedule: 'Ca sáng 7:00–12:00 hoặc chiều 13:00–18:00',
-        category: 'Sự kiện / Lễ tân',
-        posted: '21 thg 11, 2026',
-        description: 'Hỗ trợ check-in, hướng dẫn thông tin lưu trú và dịch vụ cho du khách.',
-        requirements: 'Ngoại hình ưa nhìn, giao tiếp tiếng Anh cơ bản, thái độ thân thiện.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 3,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-13',
-        company: 'Trung tâm Anh ngữ Quốc tế Mekong',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Trợ giảng Lớp Tiếng Anh Thiếu nhi (Cuối tuần)',
-        pay: '42–55K / giờ',
-        hourlyRate: 48,
-        place: '88 Đường 30 Tháng 4, Cần Thơ',
-        schedule: 'T7 & CN, 8:00–17:00',
-        category: 'Gia sư / Trợ giảng',
-        posted: '21 thg 11, 2026',
-        description: 'Hỗ trợ giáo viên nước ngoài trên lớp, điểm danh và kèm học viên.',
-        requirements: 'Sinh viên năm 1–4 tại Cần Thơ, phát âm tiếng Anh tốt, yêu trẻ.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 2,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-14',
-        company: 'Siêu thị Điện máy & Gia dụng Cảng Xanh',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Tư vấn Bán hàng & Thu ngân',
-        pay: '28–34K / giờ',
-        hourlyRate: 31,
-        place: '45 Lạch Tray, Hải Phòng',
-        schedule: 'Ca chiều 14:00–21:00 hoặc xoay ca',
-        category: 'Bán hàng / Thu ngân',
-        posted: '21 thg 11, 2026',
-        description: 'Tư vấn sản phẩm gia dụng, hỗ trợ thanh toán và sắp xếp quầy trưng bày.',
-        requirements: 'Trung thực, nhiệt tình, không yêu cầu kinh nghiệm.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 4,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-15',
-        company: 'Khu Công nghiệp VSIP I - Bình Dương',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Cộng tác viên Kiểm kê & Đóng gói Hàng Xuất khẩu',
-        pay: '32–40K / giờ',
-        hourlyRate: 36,
-        place: 'Số 8 Đại lộ Hữu Nghị, Bình Dương',
-        schedule: 'Ca tối 18:00–22:00 hoặc cuối tuần',
-        category: 'Kho vận / Giao nhận',
-        posted: '21 thg 11, 2026',
-        description: 'Quét mã vạch, kiểm đếm số lượng và dán tem thùng hàng trước khi xuất kho.',
-        requirements: 'Cẩn thận, sức khỏe tốt, ưu tiên sinh viên khu vực Thủ Dầu Một, Thuận An.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 5,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-16',
-        company: 'Hệ thống Trà sữa & Bánh ngọt Biên Hòa',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Pha chế & Phục vụ Part-time',
-        pay: '26–32K / giờ',
-        hourlyRate: 29,
-        place: '195 Phạm Văn Thuận, Đồng Nai',
-        schedule: 'Ca sáng 7:30–12:00 hoặc tối 17:30–22:00',
-        category: 'F&B / Phục vụ',
-        posted: '21 thg 11, 2026',
-        description: 'Chuẩn bị nguyên liệu, pha chế trà sữa và phục vụ khách tại quầy.',
-        requirements: 'Vui vẻ, sạch sẽ, làm được tối thiểu 4 buổi/tuần.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 3,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-17',
-        company: 'Tổ hợp Du lịch & Sự kiện Nha Trang Bay',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Điều phối Sự kiện & Chăm sóc Khách',
-        pay: '36–48K / giờ',
-        hourlyRate: 42,
-        place: '54 Trần Phú, Khánh Hòa',
-        schedule: 'Theo lịch sự kiện T6–CN',
-        category: 'Sự kiện / Lễ tân',
-        posted: '21 thg 11, 2026',
-        description: 'Đón tiếp khách tham dự gala, hướng dẫn vị trí và hỗ trợ hậu cần sân khấu.',
-        requirements: 'Năng động, giao tiếp lưu loát, ưu tiên sinh viên ĐH Nha Trang.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 4,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-18',
-        company: 'Tiệm Cà phê Săn Mây & Studio Đà Lạt',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Phục vụ & Hỗ trợ Chụp ảnh Check-in',
-        pay: '27–33K / giờ',
-        hourlyRate: 30,
-        place: '12 Đống Đa, Lâm Đồng',
-        schedule: 'Sáng 7:00–12:00 hoặc Chiều 13:00–18:00',
-        category: 'F&B / Phục vụ',
-        posted: '21 thg 11, 2026',
-        description: 'Phục vụ đồ uống, giữ gìn không gian quán và hỗ trợ khách du lịch tham quan.',
-        requirements: 'Thân thiện, yêu thích nhiếp ảnh và du lịch là lợi thế.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 3,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-19',
-        company: 'Nhà hàng Đặc sản & Không gian Văn hóa Cố Đô',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Lễ tân & Phục vụ Tiệc',
-        pay: '28–35K / giờ',
-        hourlyRate: 31,
-        place: '34 Lê Lợi, Huế',
-        schedule: 'Ca chiều tối 16:30–21:30',
-        category: 'F&B / Phục vụ',
-        posted: '21 thg 11, 2026',
-        description: 'Đón khách, giới thiệu thực đơn ẩm thực Huế và phục vụ bàn chuyên nghiệp.',
-        requirements: 'Lịch sự, nhẹ nhàng, đúng giờ, được bao cơm ca.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 3,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-20',
-        company: 'Khu Nghỉ dưỡng Bãi Sau Vũng Tàu',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Cộng tác viên Lễ tân & Tổ chức Team Building',
-        pay: '38–50K / giờ',
-        hourlyRate: 44,
-        place: '150 Thùy Vân, Bà Rịa - Vũng Tàu',
-        schedule: 'Cuối tuần T7 & CN (7:30–16:30)',
-        category: 'Sự kiện / Lễ tân',
-        posted: '21 thg 11, 2026',
-        description: 'Hỗ trợ chuẩn bị đạo cụ trò chơi bãi biển và hướng dẫn đoàn khách.',
-        requirements: 'Hoạt bát, sức khỏe tốt, có tinh thần đồng đội.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 5,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-21',
-        company: 'Công ty Truyền thông Số Sông Lam Media',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Cộng tác viên Viết Content & Quản trị Fanpage',
-        pay: '35–48K / giờ',
-        hourlyRate: 41,
-        place: '72 Nguyễn Thị Minh Khai, Nghệ An',
-        schedule: 'Linh hoạt 20h/tuần (Online / Tại văn phòng)',
-        category: 'Marketing / Content',
-        posted: '21 thg 11, 2026',
-        description: 'Sáng tạo nội dung mạng xã hội, lên kịch bản video ngắn và thiết kế Canva.',
-        requirements: 'Có laptop cá nhân, viết trôi chảy, ưu tiên sinh viên ĐH Vinh.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 2,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-22',
-        company: 'Trung tâm Bồi dưỡng Kiến thức Lam Sơn',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Gia sư Kèm Toán & Tiếng Anh Cấp 2',
-        pay: '45–60K / giờ',
-        hourlyRate: 52,
-        place: '110 Lê Hoàn, Thanh Hóa',
-        schedule: 'T2, T4, T6 (17:30–20:30)',
-        category: 'Gia sư / Trợ giảng',
-        posted: '21 thg 11, 2026',
-        description: 'Kèm nhóm nhỏ 3–5 học sinh ôn tập kiến thức và giải bài tập nâng cao.',
-        requirements: 'Nắm vững kiến thức THCS, kiên nhẫn, truyền đạt dễ hiểu.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 2,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-23',
-        company: 'Tổ hợp Du lịch & Du thuyền Hạ Long Bay',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Hướng dẫn Check-in Cảng Tàu Du lịch',
-        pay: '35–45K / giờ',
-        hourlyRate: 40,
-        place: 'Cảng Tuần Châu, Quảng Ninh',
-        schedule: 'Ca sáng 7:00–12:00 hoặc cuối tuần',
-        category: 'Sự kiện / Lễ tân',
-        posted: '21 thg 11, 2026',
-        description: 'Đón đoàn khách tại bến cảng, kiểm tra vé và hướng dẫn lên tàu an toàn.',
-        requirements: 'Giao tiếp tự tin, chịu được môi trường ngoài trời năng động.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 4,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-24',
-        company: 'Trung tâm Logistics & Kho vận Kinh Bắc',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Nhập liệu & Phân loại Bưu kiện',
-        pay: '30–38K / giờ',
-        hourlyRate: 34,
-        place: '25 Lý Thái Tổ, Bắc Ninh',
-        schedule: 'Ca tối 18:00–22:00',
-        category: 'Kho vận / Giao nhận',
-        posted: '21 thg 11, 2026',
-        description: 'Nhập mã vận đơn lên hệ thống và phân loại đơn hàng theo tuyến giao.',
-        requirements: 'Thao tác máy tính cơ bản, cẩn thận, nhanh nhẹn.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 4,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-25',
-        company: 'Hệ thống Nhà sách & Văn phòng phẩm Thái Nguyên',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Bán hàng & Thu ngân Nhà sách',
-        pay: '26–32K / giờ',
-        hourlyRate: 29,
-        place: '168 Lương Ngọc Quyến, Thái Nguyên',
-        schedule: 'Xoay ca Sáng / Chiều linh hoạt theo lịch học',
-        category: 'Bán hàng / Thu ngân',
-        posted: '21 thg 11, 2026',
-        description: 'Sắp xếp sách, tư vấn dụng cụ học tập và thanh toán cho khách hàng.',
-        requirements: 'Ưu tiên sinh viên khu vực ĐH Thái Nguyên, trung thực, hòa nhã.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 3,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-26',
-        company: 'Studio Thương mại Điện tử & Livestream Tây Nguyên',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Hỗ trợ Livestream & Quay Video Đặc sản Cà phê',
-        pay: '40–55K / giờ',
-        hourlyRate: 47,
-        place: '65 Phan Chu Trinh, Đắk Lắk',
-        schedule: '3–4 buổi tối/tuần (19:00–22:00)',
-        category: 'Marketing / Content',
-        posted: '21 thg 11, 2026',
-        description: 'Hỗ trợ setup ánh sáng, chốt đơn bình luận và quay clip TikTok giới thiệu sản phẩm.',
-        requirements: 'Hoạt ngôn, biết sử dụng CapCut cơ bản, yêu thích sáng tạo nội dung.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 2,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-27',
-        company: 'Chuỗi Cửa hàng Tiện lợi Phú Quốc Mart',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Nhân viên Bán hàng & Hỗ trợ Du khách',
-        pay: '30–38K / giờ',
-        hourlyRate: 34,
-        place: '90 Trần Hưng Đạo, Kiên Giang',
-        schedule: 'Ca chiều 14:00–22:00',
-        category: 'Bán hàng / Thu ngân',
-        posted: '21 thg 11, 2026',
-        description: 'Thu ngân, bổ sung hàng hóa lên kệ và hỗ trợ khách du lịch mua sắm.',
-        requirements: 'Nhanh nhẹn, thật thà, giao tiếp tiếng Anh cơ bản là điểm cộng.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 3,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-28',
-        company: 'Trung tâm Giao nhận & Phân phối Long Xuyên',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Cộng tác viên Đóng gói & Điều phối Đơn hàng',
-        pay: '28–35K / giờ',
-        hourlyRate: 31,
-        place: '142 Trần Hưng Đạo, An Giang',
-        schedule: 'Sáng 7:30–11:30 hoặc Chiều 13:30–17:30',
-        category: 'Kho vận / Giao nhận',
-        posted: '21 thg 11, 2026',
-        description: 'Đóng gói hàng tiêu dùng, kiểm tra phiếu giao và bàn giao cho shipper.',
-        requirements: 'Chăm chỉ, đúng giờ, phù hợp sinh viên ĐH An Giang.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 3,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-29',
-        company: 'Học viện Kỹ năng & Ngoại ngữ Quy Nhơn',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Trợ giảng Tiếng Anh & Hỗ trợ Sự kiện Học thuật',
-        pay: '40–52K / giờ',
-        hourlyRate: 46,
-        place: '210 Nguyễn Tất Thành, Bình Định',
-        schedule: 'T7 & CN hoặc các buổi tối trong tuần',
-        category: 'Gia sư / Trợ giảng',
-        posted: '21 thg 11, 2026',
-        description: 'Kèm học viên luyện nói, chấm bài tập và hỗ trợ tổ chức câu lạc bộ tiếng Anh.',
-        requirements: 'Sinh viên chuyên ngành Ngôn ngữ Anh hoặc có chứng chỉ tiếng Anh khá.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 2,
-        applicationCount: 0,
-      },
-      {
-        id: 'job-30',
-        company: 'Công ty Truyền thông & Du lịch Tràng An Digital',
-        employerEmail: 'ntd@gmail.com',
-        title: 'Cộng tác viên Thiết kế Ấn phẩm & Chụp ảnh Du lịch',
-        pay: '38–50K / giờ',
-        hourlyRate: 44,
-        place: '48 Đinh Tiên Hoàng, Ninh Bình',
-        schedule: 'Linh hoạt theo dự án (15–20h/tuần)',
-        category: 'Marketing / Content',
-        posted: '21 thg 11, 2026',
-        description: 'Thiết kế banner quảng bá tour, chỉnh sửa ảnh và đăng bài truyền thông.',
-        requirements: 'Sử dụng tốt Canva/Photoshop, có gu thẩm mỹ tốt.',
-        status: 'recruiting',
-        moderationStatus: 'approved',
-        openings: 2,
-        applicationCount: 0,
-      },
-    ],
-    adminUsers: [
-      {
-        id: 'usr-1',
-        name: 'Nguyễn Văn Vinh',
-        email: 'vinh@vanlang.edu.vn',
-        role: 'student',
-        active: true,
-      },
-      {
-        id: 'usr-2',
-        name: 'Đơn vị tuyển dụng đối tác',
-        email: 'hr@doitac.vn',
-        role: 'employer',
-        active: true,
-      },
-    ],
-    adminJobs: [],
-    adminReviews: [
-      {
-        id: 'rev-1',
-        author: 'Nguyễn Văn Vinh',
-        target: 'The Coffee House',
-        rating: 5,
-        content: 'Quản lý thân thiện, sắp xếp ca làm rất linh hoạt theo lịch thi của sinh viên.',
-        status: 'Đang hiển thị',
-      },
-    ],
+  const fallbackRows = await sql`
+    SELECT * FROM users ORDER BY created_at ASC LIMIT 1
+  `;
+  if (fallbackRows.length > 0) {
+    return mapUserRowToProfile(fallbackRows[0]);
   }
-}
 
-const store = globalForShiftly.__shiftlyMockStore!
-if (!store.passwordsByEmail) {
-  store.passwordsByEmail = { ...DEFAULT_PASSWORDS }
+  return {
+    role: 'student',
+    name: 'Nguyễn Văn Vinh',
+    email: DEFAULT_SESSION_EMAIL,
+    phone: '',
+    school: '',
+    major: '',
+    bio: '',
+    defaultCvName: '',
+    defaultCvUrl: '',
+    companyName: '',
+    companyArea: 'Quận 1',
+    companyAddress: '',
+    companyDescription: '',
+    isProfileCompleted: false,
+    emailVerified: true,
+  };
 }
-if (!store.pendingVerificationsByEmail) {
-  store.pendingVerificationsByEmail = {}
-}
-if (!store.profilesByEmail) {
-  store.profilesByEmail = {}
-}
-if (!store.savedJobsByEmail) {
-  store.savedJobsByEmail = {}
-}
-if (!store.notificationsByEmail) {
-  store.notificationsByEmail = {}
-}
-
-const mockProfilesByEmail = store.profilesByEmail
-const mockPasswordsByEmail = store.passwordsByEmail
-const mockApplications = store.applications
-const mockSavedJobsByEmail = store.savedJobsByEmail
-const mockNotificationsByEmail = store.notificationsByEmail
-const mockEmployerJobs = store.employerJobs
-const mockAdminUsers = store.adminUsers
-const mockAdminJobs = store.adminJobs
-const mockAdminReviews = store.adminReviews
 
 async function dispatchVerificationEmail(
   email: string,
@@ -968,26 +179,26 @@ async function dispatchVerificationEmail(
   code: string,
   purpose: 'signup' | 'reset-password' = 'signup',
 ): Promise<{ sent: boolean; error?: string }> {
-  const gmailUser = process.env.GMAIL_USER?.trim()
-  const gmailAppPassword = process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, '').trim()
+  const gmailUser = process.env.GMAIL_USER?.trim();
+  const gmailAppPassword = process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, '').trim();
 
   if (!gmailUser || !gmailAppPassword) {
-    console.warn('[SHIFTLY] Thiếu GMAIL_USER hoặc GMAIL_APP_PASSWORD trong biến môi trường')
+    console.warn('[SHIFTLY] Thiếu GMAIL_USER hoặc GMAIL_APP_PASSWORD trong biến môi trường');
     return {
       sent: false,
       error:
         'Chưa cấu hình GMAIL_USER và GMAIL_APP_PASSWORD trong biến môi trường (Vercel / .env).',
-    }
+    };
   }
 
-  const isReset = purpose === 'reset-password'
+  const isReset = purpose === 'reset-password';
   const subject = isReset
     ? `[Shiftly] Mã OTP đặt lại mật khẩu của bạn là ${code}`
-    : `[Shiftly] Mã xác thực OTP của bạn là ${code}`
-  const heading = isReset ? 'Khôi phục mật khẩu - Shiftly' : 'Xác thực tài khoản email - Shiftly'
+    : `[Shiftly] Mã xác thực OTP của bạn là ${code}`;
+  const heading = isReset ? 'Khôi phục mật khẩu - Shiftly' : 'Xác thực tài khoản email - Shiftly';
   const introText = isReset
     ? 'Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản <strong>Shiftly</strong> của bạn. Vui lòng nhập mã OTP 6 chữ số bên dưới để tạo mật khẩu mới:'
-    : 'Cảm ơn bạn đã đăng ký tài khoản trên <strong>Shiftly</strong>. Vui lòng nhập mã OTP 6 chữ số bên dưới để hoàn tất xác thực:'
+    : 'Cảm ơn bạn đã đăng ký tài khoản trên <strong>Shiftly</strong>. Vui lòng nhập mã OTP 6 chữ số bên dưới để hoàn tất xác thực:';
 
   try {
     const transporter = nodemailer.createTransport({
@@ -996,7 +207,7 @@ async function dispatchVerificationEmail(
         user: gmailUser,
         pass: gmailAppPassword,
       },
-    })
+    });
 
     await transporter.sendMail({
       from: `"Shiftly" <${gmailUser}>`,
@@ -1011,220 +222,191 @@ async function dispatchVerificationEmail(
         </div>
         <p style="font-size:13px;color:#5c6660;">Mã xác thực có hiệu lực trong <strong>15 phút</strong>. Nếu bạn không thực hiện yêu cầu này, vui lòng bỏ qua email.</p>
       </div>`,
-    })
+    });
 
-    return { sent: true }
+    return { sent: true };
   } catch (err) {
-    console.error('[SHIFTLY GMAIL SMTP ERROR]', err)
+    console.error('[SHIFTLY GMAIL SMTP ERROR]', err);
     return {
       sent: false,
       error:
         'Không thể gửi email qua Gmail SMTP. Kiểm tra lại GMAIL_USER và App Password trên Vercel / .env.',
-    }
+    };
   }
 }
 
-function pushNotification(
+async function pushNotification(
   targetEmail: string,
   payload: Omit<NotificationItem, 'id' | 'read' | 'date'>,
 ) {
-  const key = targetEmail.trim().toLowerCase()
-  if (!key) return
-  if (!mockNotificationsByEmail[key]) {
-    mockNotificationsByEmail[key] = []
-  }
-  mockNotificationsByEmail[key].unshift({
-    id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    title: payload.title,
-    message: payload.message,
-    read: false,
-    date: 'Vừa xong',
-    targetPage: payload.targetPage,
-  })
+  const key = targetEmail.trim().toLowerCase();
+  if (!key) return;
+  const id = `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  await sql`
+    INSERT INTO notifications (id, recipient_email, title, message, is_read, target_page, date_label)
+    VALUES (${id}, ${key}, ${payload.title}, ${payload.message}, FALSE, ${payload.targetPage || 'jobs'}, 'Vừa xong')
+  `;
 }
 
-function pushNotificationToEmployers(
+async function pushNotificationToEmployers(
   employerEmail: string | undefined,
   companyName: string | undefined,
   payload: Omit<NotificationItem, 'id' | 'read' | 'date'>,
 ) {
-  const recipients = new Set<string>(DEMO_EMPLOYER_EMAILS)
-  if (employerEmail) recipients.add(employerEmail.trim().toLowerCase())
+  const recipients = new Set<string>(DEMO_EMPLOYER_EMAILS);
+  if (employerEmail) recipients.add(employerEmail.trim().toLowerCase());
 
-  for (const user of mockAdminUsers) {
-    if (user.role === 'employer') {
-      if (
-        !companyName ||
-        user.name.toLowerCase() === companyName.toLowerCase() ||
-        user.email.toLowerCase() === employerEmail?.toLowerCase()
-      ) {
-        recipients.add(user.email.toLowerCase())
-      }
+  const employers = await sql`
+    SELECT email, name, company_name FROM users WHERE role = 'employer'
+  `;
+
+  for (const emp of employers) {
+    const empEmail = String(emp.email || '').toLowerCase();
+    const empName = String(emp.name || '').toLowerCase();
+    const empCompany = String(emp.company_name || '').toLowerCase();
+    const targetCompany = (companyName || '').toLowerCase();
+
+    if (
+      !targetCompany ||
+      empCompany === targetCompany ||
+      empName === targetCompany ||
+      empEmail === employerEmail?.toLowerCase()
+    ) {
+      recipients.add(empEmail);
     }
   }
 
-  for (const profile of Object.values(mockProfilesByEmail)) {
-    if (profile.role === 'employer') {
-      if (
-        !companyName ||
-        profile.companyName.toLowerCase() === companyName.toLowerCase() ||
-        profile.name.toLowerCase() === companyName.toLowerCase()
-      ) {
-        recipients.add(profile.email.toLowerCase())
-      }
-    }
+  for (const email of recipients) {
+    await pushNotification(email, payload);
   }
-
-  recipients.forEach((email) => pushNotification(email, payload))
-}
-
-function getApplicationsForCurrentUser() {
-  if (store.currentUser.role === 'student') {
-    const emailLower = store.currentUser.email.toLowerCase()
-    if (DEMO_STUDENT_EMAILS.includes(emailLower)) {
-      return mockApplications.filter((a) =>
-        DEMO_STUDENT_EMAILS.includes(a.studentEmail.toLowerCase()),
-      )
-    }
-    return mockApplications.filter((a) => a.studentEmail.toLowerCase() === emailLower)
-  }
-  return mockApplications
-}
-
-function getSavedJobsForCurrentUser() {
-  const emailLower = store.currentUser.email.toLowerCase()
-  if (!mockSavedJobsByEmail[emailLower]) {
-    mockSavedJobsByEmail[emailLower] = []
-  }
-  return mockSavedJobsByEmail[emailLower]
-}
-
-function getNotificationsForCurrentUser() {
-  const emailLower = store.currentUser.email.toLowerCase()
-  if (!mockNotificationsByEmail[emailLower]) {
-    mockNotificationsByEmail[emailLower] = [
-      {
-        id: `notif-welcome-${Date.now()}`,
-        title: 'Chào mừng bạn đến với shiftly',
-        message: 'Hãy cập nhật hồ sơ cá nhân để bắt đầu sử dụng đầy đủ tính năng.',
-        read: false,
-        date: 'Hôm nay',
-        targetPage: store.currentUser.role === 'employer' ? 'employer' : 'jobs',
-      },
-    ]
-  }
-  return mockNotificationsByEmail[emailLower]
 }
 
 export async function loginAction(input: {
-  email: string
-  password: string
-  fallbackName?: string
+  email: string;
+  password: string;
+  fallbackName?: string;
 }): Promise<ActionResult<{ role: string; name: string; profile: UserProfileData }>> {
   if (!input.email || !input.password) {
-    return { ok: false, error: 'Vui lòng nhập email và mật khẩu.' }
+    return { ok: false, error: 'Vui lòng nhập email và mật khẩu.' };
   }
 
-  const emailLower = input.email.trim().toLowerCase()
-  const registeredUser = mockAdminUsers.find((u) => u.email.toLowerCase() === emailLower)
-  const isDemoAccount = DEMO_ACCOUNTS.includes(emailLower)
+  const emailLower = input.email.trim().toLowerCase();
+  const rows = await sql`
+    SELECT * FROM users WHERE LOWER(email) = ${emailLower} LIMIT 1
+  `;
 
-  if (!registeredUser && !isDemoAccount) {
+  if (rows.length === 0) {
     return {
       ok: false,
       error: 'Tài khoản này chưa được đăng ký. Vui lòng chọn "Đăng ký ngay" để tạo tài khoản.',
-    }
+    };
   }
 
-  const expectedPassword = mockPasswordsByEmail?.[emailLower]
-  if (expectedPassword && expectedPassword !== input.password) {
-    return { ok: false, error: 'Mật khẩu không chính xác.' }
+  const userRow = rows[0];
+
+  if (userRow.password_hash !== input.password) {
+    return { ok: false, error: 'Mật khẩu không chính xác.' };
   }
 
-  if (registeredUser && !registeredUser.active) {
-    return { ok: false, error: 'Tài khoản này đã bị khóa bởi quản trị viên.' }
+  if (userRow.active === false) {
+    return { ok: false, error: 'Tài khoản này đã bị khóa bởi quản trị viên.' };
   }
 
-  const existingProfile = mockProfilesByEmail[emailLower]
-  if (existingProfile && existingProfile.emailVerified === false) {
+  if (userRow.email_verified === false) {
     return {
       ok: false,
       error:
         'Email này chưa được xác thực. Vui lòng nhập mã xác thực gửi về email của bạn trước khi đăng nhập.',
-    }
+    };
   }
 
-  if (existingProfile) {
-    store.currentUser = { ...existingProfile }
-    if (registeredUser) {
-      store.currentUser.role = registeredUser.role
-      store.currentUser.name = registeredUser.name
-    }
-    return {
-      ok: true,
-      data: {
-        role: store.currentUser.role,
-        name: store.currentUser.name,
-        profile: { ...store.currentUser },
-      },
-    }
-  }
+  const cookieStore = await cookies();
+  cookieStore.set(SESSION_COOKIE_NAME, emailLower, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 7,
+  });
 
-  let role: 'student' | 'employer' | 'admin' = 'student'
-  let defaultName = input.fallbackName?.trim() || 'Nguyễn Văn Vinh'
-  if (emailLower.includes('admin')) {
-    role = 'admin'
-    defaultName = 'Quản trị viên hệ thống'
-  } else if (
-    emailLower.includes('hr') ||
-    emailLower.includes('employer') ||
-    emailLower.includes('ntd')
-  ) {
-    role = 'employer'
-    defaultName = input.fallbackName?.trim() || 'Đơn vị tuyển dụng đối tác'
-  }
-
-  const resolvedName = registeredUser?.name || defaultName
-
-  store.currentUser = {
-    role,
-    name: resolvedName,
-    email: emailLower,
-    phone: '',
-    school: '',
-    major: '',
-    bio: '',
-    defaultCvName: '',
-    defaultCvUrl: '',
-    companyName: role === 'employer' ? resolvedName : '',
-    companyArea: 'Quận 1',
-    companyAddress: '',
-    companyDescription: '',
-    isProfileCompleted: role === 'admin',
-    emailVerified: true,
-  }
-  mockProfilesByEmail[emailLower] = { ...store.currentUser }
-
-  if (!mockSavedJobsByEmail[emailLower]) {
-    mockSavedJobsByEmail[emailLower] = []
-  }
-
+  const profile = mapUserRowToProfile(userRow);
   return {
     ok: true,
     data: {
-      role: store.currentUser.role,
-      name: store.currentUser.name,
-      profile: { ...store.currentUser },
+      role: profile.role,
+      name: profile.name,
+      profile,
     },
-  }
+  };
 }
 
 export async function logoutAction(): Promise<ActionResult> {
-  return { ok: true }
+  const cookieStore = await cookies();
+  cookieStore.delete(SESSION_COOKIE_NAME);
+  return { ok: true };
 }
 
 export async function getMarketplaceSessionAction(): Promise<ActionResult<any>> {
-  const approvedJobs = mockEmployerJobs
+  const currentUser = await getCurrentSessionUser();
+  const emailLower = currentUser.email.toLowerCase();
+
+  const [jobRows, appRows, savedRows, notifRows, userRows, reviewRows] = await Promise.all([
+    sql`SELECT * FROM jobs ORDER BY created_at DESC`,
+    currentUser.role === 'student'
+      ? DEMO_STUDENT_EMAILS.includes(emailLower)
+        ? sql`SELECT * FROM applications WHERE LOWER(student_email) IN ('vinh@vanlang.edu.vn', 'sv@gmail.com') ORDER BY created_at DESC`
+        : sql`SELECT * FROM applications WHERE LOWER(student_email) = ${emailLower} ORDER BY created_at DESC`
+      : sql`SELECT * FROM applications ORDER BY created_at DESC`,
+    sql`SELECT id, job_id FROM saved_jobs WHERE LOWER(student_email) = ${emailLower} ORDER BY created_at DESC`,
+    sql`SELECT * FROM notifications WHERE LOWER(recipient_email) = ${emailLower} ORDER BY created_at DESC`,
+    sql`SELECT id, name, email, role, active FROM users ORDER BY created_at DESC`,
+    sql`SELECT * FROM reviews ORDER BY created_at DESC`,
+  ]);
+
+  const reviewsByAppId: Record<
+    string,
+    { employerReview?: ReviewData; studentReview?: ReviewData }
+  > = {};
+
+  for (const r of reviewRows) {
+    if (!r.application_id) continue;
+    if (!reviewsByAppId[r.application_id]) {
+      reviewsByAppId[r.application_id] = {};
+    }
+    const mappedReview: ReviewData = {
+      id: r.id,
+      rating: Number(r.rating),
+      comment: r.content || '',
+      date: r.review_date_label || 'Hôm nay',
+      reviewerName: r.author_name,
+      moderationStatus: r.moderation_status as 'pending' | 'approved' | 'hidden',
+    };
+    if (r.review_type === 'employer-to-student') {
+      reviewsByAppId[r.application_id].employerReview = mappedReview;
+    } else if (r.review_type === 'student-to-employer') {
+      reviewsByAppId[r.application_id].studentReview = mappedReview;
+    }
+  }
+
+  const employerJobs = jobRows.map((j) => ({
+    id: j.id,
+    company: j.company,
+    employerEmail: j.employer_email,
+    title: j.title,
+    pay: j.pay,
+    hourlyRate: Number(j.hourly_rate || 30),
+    place: j.place,
+    schedule: j.schedule,
+    category: j.category,
+    posted: j.posted_label || 'Hôm nay',
+    description: j.description || '',
+    requirements: j.requirements || '',
+    status: j.status as 'recruiting' | 'paused' | 'filled' | 'completed',
+    moderationStatus: j.moderation_status as 'pending' | 'approved' | 'rejected',
+    openings: Number(j.openings || 1),
+    applicationCount: Number(j.application_count || 0),
+  }));
+
+  const approvedJobs = employerJobs
     .filter((j) => j.moderationStatus === 'approved' && j.status === 'recruiting')
     .map((j) => ({
       id: j.id,
@@ -1237,148 +419,258 @@ export async function getMarketplaceSessionAction(): Promise<ActionResult<any>> 
       category: j.category,
       posted: j.posted,
       description: j.description,
-    }))
+    }));
 
-  const pendingModerationJobs = mockAdminJobs.filter((j) => j.status === 'Chờ duyệt')
+  const pendingModerationJobs: PendingModerationJob[] = employerJobs
+    .filter((j) => j.moderationStatus === 'pending')
+    .map((j) => ({
+      id: j.id,
+      title: j.title,
+      company: j.company,
+      pay: j.pay,
+      hourlyRate: j.hourlyRate,
+      place: j.place,
+      schedule: j.schedule,
+      category: j.category,
+      posted: j.posted,
+      description: j.description,
+      requirements: j.requirements,
+      openings: j.openings,
+      status: 'Chờ duyệt',
+    }));
+
+  const applications = appRows.map((a) => {
+    const cvName = a.cv_name || '';
+    const cvUrl =
+      a.cv_url || (cvName === 'CV_NguyenVanVinh.pdf' ? SAMPLE_CV_PDF_DATA_URL : undefined);
+    const linkedReviews = reviewsByAppId[a.id] || {};
+
+    return {
+      id: a.id,
+      jobId: a.job_id,
+      title: a.job_title,
+      company: a.company_name,
+      employerEmail: a.employer_email,
+      date: a.applied_date_label || 'Hôm nay',
+      status: a.status as 'pending' | 'hired' | 'rejected' | 'completed',
+      studentEmail: a.student_email,
+      studentName: a.student_name,
+      studentSchool: a.student_school || 'Sinh viên ứng tuyển',
+      introduction: a.introduction || '',
+      pay: a.pay,
+      place: a.place,
+      schedule: a.schedule,
+      openings: 1,
+      hasCV: Boolean(a.has_cv),
+      cvName,
+      cvUrl,
+      employerReview: linkedReviews.employerReview,
+      studentReview: linkedReviews.studentReview,
+    };
+  });
+
+  const savedJobs = savedRows.map((s) => ({
+    id: s.id,
+    jobId: s.job_id,
+  }));
+
+  const notifications: NotificationItem[] =
+    notifRows.length > 0
+      ? notifRows.map((n) => ({
+          id: n.id,
+          title: n.title,
+          message: n.message,
+          read: Boolean(n.is_read),
+          date: n.date_label || 'Hôm nay',
+          targetPage: n.target_page || 'jobs',
+        }))
+      : [
+          {
+            id: `notif-welcome-${Date.now()}`,
+            title: 'Chào mừng bạn đến với shiftly',
+            message: 'Hãy cập nhật hồ sơ cá nhân để bắt đầu sử dụng đầy đủ tính năng.',
+            read: false,
+            date: 'Hôm nay',
+            targetPage: currentUser.role === 'employer' ? 'employer' : 'jobs',
+          },
+        ];
+
+  const adminUsers = userRows
+    .filter((u) => u.role !== 'admin')
+    .map((u) => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role as 'student' | 'employer' | 'admin',
+      active: Boolean(u.active),
+    }));
+
+  const adminReviews = reviewRows.map((r) => ({
+    id: r.id,
+    applicationId: r.application_id || undefined,
+    reviewType: r.review_type as 'employer-to-student' | 'student-to-employer',
+    author: r.author_name,
+    target: r.target_name,
+    rating: Number(r.rating),
+    content: r.content || '',
+    status:
+      r.moderation_status === 'approved'
+        ? 'Đang hiển thị'
+        : r.moderation_status === 'hidden'
+          ? 'Đã ẩn'
+          : 'Chờ duyệt',
+  }));
 
   return {
     ok: true,
     data: {
-      role: store.currentUser.role,
-      name: store.currentUser.name,
-      profile: { ...store.currentUser },
-      applications: getApplicationsForCurrentUser(),
-      savedJobs: getSavedJobsForCurrentUser(),
-      notifications: getNotificationsForCurrentUser(),
-      employerJobs: mockEmployerJobs,
-      adminUsers: mockAdminUsers,
+      role: currentUser.role,
+      name: currentUser.name,
+      profile: currentUser,
+      applications,
+      savedJobs,
+      notifications,
+      employerJobs,
+      adminUsers,
       adminJobs: pendingModerationJobs,
-      adminReviews: mockAdminReviews,
+      adminReviews,
       approvedJobs,
     },
-  }
+  };
 }
 
 export async function updateProfileAction(
   input: Partial<UserProfileData>,
 ): Promise<ActionResult<UserProfileData>> {
-  const emailLower = (input.email ?? store.currentUser.email).trim().toLowerCase()
+  const currentUser = await getCurrentSessionUser();
+  const emailLower = (input.email ?? currentUser.email).trim().toLowerCase();
   const nextName = (
-    store.currentUser.role === 'employer' && input.companyName?.trim()
+    currentUser.role === 'employer' && input.companyName?.trim()
       ? input.companyName.trim()
-      : input.name?.trim() || store.currentUser.name
-  ).trim()
+      : input.name?.trim() || currentUser.name
+  ).trim();
 
-  store.currentUser = {
-    ...store.currentUser,
+  const updated: UserProfileData = {
+    ...currentUser,
     ...input,
     name: nextName,
     email: emailLower,
-    companyName: (input.companyName ?? store.currentUser.companyName).trim(),
+    companyName: (input.companyName ?? currentUser.companyName).trim(),
     isProfileCompleted: true,
-  }
+  };
 
-  mockProfilesByEmail[emailLower] = { ...store.currentUser }
+  await sql`
+    UPDATE users
+    SET
+      name = ${updated.name},
+      phone = ${updated.phone},
+      school = ${updated.school},
+      major = ${updated.major},
+      bio = ${updated.bio},
+      default_cv_name = ${updated.defaultCvName},
+      default_cv_url = ${updated.defaultCvUrl},
+      company_name = ${updated.companyName},
+      company_area = ${updated.companyArea},
+      company_address = ${updated.companyAddress},
+      company_description = ${updated.companyDescription},
+      is_profile_completed = TRUE,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE LOWER(email) = ${emailLower}
+  `;
 
-  const userIdx = mockAdminUsers.findIndex((u) => u.email.toLowerCase() === emailLower)
-  if (userIdx > -1) {
-    mockAdminUsers[userIdx] = {
-      ...mockAdminUsers[userIdx],
-      name: store.currentUser.name,
-      email: store.currentUser.email,
-    }
-  }
-
-  pushNotification(emailLower, {
+  await pushNotification(emailLower, {
     title: 'Đã cập nhật hồ sơ cá nhân',
     message: 'Thông tin hồ sơ của bạn đã được lưu và đồng bộ thành công.',
-    targetPage: store.currentUser.role === 'employer' ? 'employer' : 'jobs',
-  })
+    targetPage: currentUser.role === 'employer' ? 'employer' : 'jobs',
+  });
 
-  return { ok: true, data: { ...store.currentUser } }
+  return { ok: true, data: updated };
 }
 
 export async function signupAction(input: {
-  name: string
-  email: string
-  password: string
-  role: string
-  school?: string
-  major?: string
-  companyName?: string
+  name: string;
+  email: string;
+  password: string;
+  role: string;
+  school?: string;
+  major?: string;
+  companyName?: string;
 }): Promise<ActionResult<VerificationPendingData>> {
   if (!input.name?.trim() || !input.email?.trim() || !input.password) {
-    return { ok: false, error: 'Vui lòng điền đầy đủ họ tên, email và mật khẩu.' }
+    return { ok: false, error: 'Vui lòng điền đầy đủ họ tên, email và mật khẩu.' };
   }
-  const emailLower = input.email.trim().toLowerCase()
-  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLower)
+  const emailLower = input.email.trim().toLowerCase();
+  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLower);
   if (!isValidEmail) {
-    return { ok: false, error: 'Vui lòng nhập địa chỉ email hợp lệ để nhận mã xác thực.' }
+    return { ok: false, error: 'Vui lòng nhập địa chỉ email hợp lệ để nhận mã xác thực.' };
   }
 
-  const role: 'student' | 'employer' = input.role === 'employer' ? 'employer' : 'student'
-  const cleanName = input.name.trim()
+  const role: 'student' | 'employer' = input.role === 'employer' ? 'employer' : 'student';
+  const cleanName = input.name.trim();
   const displayName =
-    role === 'employer' && input.companyName?.trim() ? input.companyName.trim() : cleanName
+    role === 'employer' && input.companyName?.trim() ? input.companyName.trim() : cleanName;
+  const companyNameValue = role === 'employer' ? input.companyName?.trim() || cleanName : '';
 
-  const code = String(Math.floor(100000 + Math.random() * 900000))
-  const mailResult = await dispatchVerificationEmail(emailLower, displayName, code, 'signup')
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const mailResult = await dispatchVerificationEmail(emailLower, displayName, code, 'signup');
   if (!mailResult.sent) {
-    return { ok: false, error: mailResult.error || 'Gửi mã OTP về email thất bại.' }
+    return { ok: false, error: mailResult.error || 'Gửi mã OTP về email thất bại.' };
   }
 
-  const freshProfile: UserProfileData = {
-    role,
-    name: displayName,
-    email: emailLower,
-    phone: '',
-    school: '',
-    major: '',
-    bio: '',
-    defaultCvName: '',
-    defaultCvUrl: '',
-    companyName: role === 'employer' ? input.companyName?.trim() || cleanName : '',
-    companyArea: 'Quận 1',
-    companyAddress: '',
-    companyDescription: '',
-    isProfileCompleted: false,
-    emailVerified: false,
+  const existingUsers = await sql`
+    SELECT id FROM users WHERE LOWER(email) = ${emailLower} LIMIT 1
+  `;
+
+  if (existingUsers.length > 0) {
+    await sql`
+      UPDATE users
+      SET
+        password_hash = ${input.password},
+        role = ${role},
+        name = ${displayName},
+        company_name = ${companyNameValue},
+        email_verified = FALSE,
+        active = TRUE,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE LOWER(email) = ${emailLower}
+    `;
+  } else {
+    const newUserId = `usr-${Date.now()}`;
+    await sql`
+      INSERT INTO users (
+        id, email, password_hash, role, name, company_name,
+        company_area, is_profile_completed, email_verified, active
+      )
+      VALUES (
+        ${newUserId}, ${emailLower}, ${input.password}, ${role}, ${displayName}, ${companyNameValue},
+        'Quận 1', FALSE, FALSE, TRUE
+      )
+    `;
   }
 
-  mockPasswordsByEmail[emailLower] = input.password
-  mockProfilesByEmail[emailLower] = freshProfile
-  mockSavedJobsByEmail[emailLower] = []
-  mockNotificationsByEmail[emailLower] = [
-    {
-      id: `notif-welcome-${Date.now()}`,
-      title: 'Chào mừng bạn đến với shiftly',
-      message:
+  await sql`
+    INSERT INTO email_verifications (email, otp_code, expires_at)
+    VALUES (${emailLower}, ${code}, NOW() + INTERVAL '15 minutes')
+    ON CONFLICT (email) DO UPDATE
+    SET otp_code = EXCLUDED.otp_code, expires_at = EXCLUDED.expires_at, created_at = CURRENT_TIMESTAMP
+  `;
+
+  await sql`
+    INSERT INTO notifications (id, recipient_email, title, message, is_read, target_page, date_label)
+    VALUES (
+      ${`notif-welcome-${Date.now()}`},
+      ${emailLower},
+      'Chào mừng bạn đến với shiftly',
+      ${
         role === 'employer'
           ? 'Hãy hoàn thiện hồ sơ doanh nghiệp và đăng tin tuyển dụng đầu tiên.'
-          : 'Hãy cập nhật hồ sơ cá nhân để bắt đầu ứng tuyển công việc phù hợp lịch học.',
-      read: false,
-      date: 'Hôm nay',
-      targetPage: role === 'employer' ? 'post-job' : 'jobs',
-    },
-  ]
-
-  const existingIndex = mockAdminUsers.findIndex((u) => u.email.toLowerCase() === emailLower)
-  if (existingIndex > -1) {
-    mockAdminUsers[existingIndex] = {
-      ...mockAdminUsers[existingIndex],
-      name: displayName,
-      role,
-      active: true,
-    }
-  } else {
-    mockAdminUsers.unshift({
-      id: `usr-${Date.now()}`,
-      name: displayName,
-      email: emailLower,
-      role,
-      active: true,
-    })
-  }
+          : 'Hãy cập nhật hồ sơ cá nhân để bắt đầu ứng tuyển công việc phù hợp lịch học.'
+      },
+      FALSE,
+      ${role === 'employer' ? 'post-job' : 'jobs'},
+      'Hôm nay'
+    )
+  `;
 
   const verificationData: VerificationPendingData = {
     email: emailLower,
@@ -1386,52 +678,70 @@ export async function signupAction(input: {
     expiresAt: Date.now() + 15 * 60 * 1000,
     sentViaEmail: true,
     previewHint: `Mã xác thực OTP 6 chữ số đã được gửi tới hộp thư ${emailLower}. Vui lòng kiểm tra hộp thư đến (cả mục Quảng cáo / Spam) để lấy mã.`,
-  }
+  };
 
-  store.pendingVerificationsByEmail[emailLower] = verificationData
-
-  return { ok: true, data: verificationData }
+  return { ok: true, data: verificationData };
 }
 
 export async function verifyEmailCodeAction(input: {
-  email: string
-  code: string
+  email: string;
+  code: string;
 }): Promise<ActionResult> {
-  const emailLower = input.email.trim().toLowerCase()
-  const cleanCode = input.code.trim()
-  const pending = store.pendingVerificationsByEmail?.[emailLower]
+  const emailLower = input.email.trim().toLowerCase();
+  const cleanCode = input.code.trim();
 
-  if (!pending) {
-    return { ok: false, error: 'Không tìm thấy yêu cầu xác thực cho email này.' }
+  const rows = await sql`
+    SELECT otp_code, (expires_at > NOW()) AS is_valid
+    FROM email_verifications
+    WHERE LOWER(email) = ${emailLower}
+    LIMIT 1
+  `;
+
+  if (rows.length === 0) {
+    return { ok: false, error: 'Không tìm thấy yêu cầu xác thực cho email này.' };
   }
-  if (Date.now() > pending.expiresAt) {
-    return { ok: false, error: 'Mã xác thực đã hết hạn. Vui lòng bấm Gửi lại mã.' }
+  if (!rows[0].is_valid) {
+    return { ok: false, error: 'Mã xác thực đã hết hạn. Vui lòng bấm Gửi lại mã.' };
   }
-  if (pending.code !== cleanCode) {
-    return { ok: false, error: 'Mã xác thực chưa chính xác. Vui lòng kiểm tra lại.' }
+  if (rows[0].otp_code !== cleanCode) {
+    return { ok: false, error: 'Mã xác thực chưa chính xác. Vui lòng kiểm tra lại.' };
   }
 
-  if (mockProfilesByEmail[emailLower]) {
-    mockProfilesByEmail[emailLower].emailVerified = true
-  }
-  delete store.pendingVerificationsByEmail[emailLower]
+  await sql`
+    UPDATE users SET email_verified = TRUE, updated_at = CURRENT_TIMESTAMP
+    WHERE LOWER(email) = ${emailLower}
+  `;
+  await sql`
+    DELETE FROM email_verifications WHERE LOWER(email) = ${emailLower}
+  `;
 
-  return { ok: true }
+  return { ok: true };
 }
 
 export async function resendVerificationCodeAction(
   email: string,
 ): Promise<ActionResult<VerificationPendingData>> {
-  const emailLower = email.trim().toLowerCase()
-  const profile = mockProfilesByEmail[emailLower]
-  if (!profile) {
-    return { ok: false, error: 'Không tìm thấy tài khoản tương ứng với email này.' }
+  const emailLower = email.trim().toLowerCase();
+  const users = await sql`
+    SELECT name FROM users WHERE LOWER(email) = ${emailLower} LIMIT 1
+  `;
+
+  if (users.length === 0) {
+    return { ok: false, error: 'Không tìm thấy tài khoản tương ứng với email này.' };
   }
-  const code = String(Math.floor(100000 + Math.random() * 900000))
-  const mailResult = await dispatchVerificationEmail(emailLower, profile.name, code, 'signup')
+
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const mailResult = await dispatchVerificationEmail(emailLower, users[0].name, code, 'signup');
   if (!mailResult.sent) {
-    return { ok: false, error: mailResult.error || 'Không thể gửi lại mã OTP về email.' }
+    return { ok: false, error: mailResult.error || 'Không thể gửi lại mã OTP về email.' };
   }
+
+  await sql`
+    INSERT INTO email_verifications (email, otp_code, expires_at)
+    VALUES (${emailLower}, ${code}, NOW() + INTERVAL '15 minutes')
+    ON CONFLICT (email) DO UPDATE
+    SET otp_code = EXCLUDED.otp_code, expires_at = EXCLUDED.expires_at, created_at = CURRENT_TIMESTAMP
+  `;
 
   const verificationData: VerificationPendingData = {
     email: emailLower,
@@ -1439,40 +749,48 @@ export async function resendVerificationCodeAction(
     expiresAt: Date.now() + 15 * 60 * 1000,
     sentViaEmail: true,
     previewHint: `Đã gửi lại mã xác thực OTP mới tới hộp thư ${emailLower}. Vui lòng kiểm tra hộp thư đến (cả mục Quảng cáo / Spam).`,
-  }
-  store.pendingVerificationsByEmail[emailLower] = verificationData
-  return { ok: true, data: verificationData }
+  };
+  return { ok: true, data: verificationData };
 }
 
 export async function requestPasswordResetAction(
   email: string,
 ): Promise<ActionResult<VerificationPendingData>> {
-  const emailLower = email.trim().toLowerCase()
+  const emailLower = email.trim().toLowerCase();
   if (!emailLower) {
-    return { ok: false, error: 'Vui lòng nhập địa chỉ email đã đăng ký.' }
+    return { ok: false, error: 'Vui lòng nhập địa chỉ email đã đăng ký.' };
   }
 
-  const profile = mockProfilesByEmail[emailLower]
-  const registeredUser = mockAdminUsers.find((u) => u.email.toLowerCase() === emailLower)
-  if (!profile && !registeredUser) {
-    return { ok: false, error: 'Không tìm thấy tài khoản nào gắn với email này.' }
+  const users = await sql`
+    SELECT name FROM users WHERE LOWER(email) = ${emailLower} LIMIT 1
+  `;
+  if (users.length === 0) {
+    return { ok: false, error: 'Không tìm thấy tài khoản nào gắn với email này.' };
   }
 
-  const displayName = profile?.name || registeredUser?.name || 'Người dùng Shiftly'
-  const code = String(Math.floor(100000 + Math.random() * 900000))
+  const displayName = users[0].name || 'Người dùng Shiftly';
+  const code = String(Math.floor(100000 + Math.random() * 900000));
 
   const mailResult = await dispatchVerificationEmail(
     emailLower,
     displayName,
     code,
     'reset-password',
-  )
+  );
   if (!mailResult.sent) {
     return {
       ok: false,
       error: mailResult.error || 'Không thể gửi mã OTP khôi phục mật khẩu về email.',
-    }
+    };
   }
+
+  const resetKey = `reset:${emailLower}`;
+  await sql`
+    INSERT INTO email_verifications (email, otp_code, expires_at)
+    VALUES (${resetKey}, ${code}, NOW() + INTERVAL '15 minutes')
+    ON CONFLICT (email) DO UPDATE
+    SET otp_code = EXCLUDED.otp_code, expires_at = EXCLUDED.expires_at, created_at = CURRENT_TIMESTAMP
+  `;
 
   const resetData: VerificationPendingData = {
     email: emailLower,
@@ -1480,444 +798,450 @@ export async function requestPasswordResetAction(
     expiresAt: Date.now() + 15 * 60 * 1000,
     sentViaEmail: true,
     previewHint: `Mã OTP khôi phục mật khẩu (6 chữ số) đã được gửi tới ${emailLower}. Vui lòng kiểm tra hộp thư đến (cả mục Quảng cáo / Spam).`,
-  }
+  };
 
-  store.pendingVerificationsByEmail[`reset:${emailLower}`] = resetData
-  return { ok: true, data: resetData }
+  return { ok: true, data: resetData };
 }
 
 export async function resetPasswordWithOtpAction(input: {
-  email: string
-  code: string
-  newPassword: string
+  email: string;
+  code: string;
+  newPassword: string;
 }): Promise<ActionResult> {
-  const emailLower = input.email.trim().toLowerCase()
-  const cleanCode = input.code.trim()
+  const emailLower = input.email.trim().toLowerCase();
+  const cleanCode = input.code.trim();
 
   if (!input.newPassword || input.newPassword.length < 6) {
-    return { ok: false, error: 'Mật khẩu mới cần có ít nhất 6 ký tự.' }
+    return { ok: false, error: 'Mật khẩu mới cần có ít nhất 6 ký tự.' };
   }
 
-  const pending = store.pendingVerificationsByEmail?.[`reset:${emailLower}`]
-  if (!pending) {
-    return { ok: false, error: 'Không tìm thấy yêu cầu đặt lại mật khẩu cho email này.' }
+  const resetKey = `reset:${emailLower}`;
+  const rows = await sql`
+    SELECT otp_code, (expires_at > NOW()) AS is_valid
+    FROM email_verifications
+    WHERE email = ${resetKey}
+    LIMIT 1
+  `;
+
+  if (rows.length === 0) {
+    return { ok: false, error: 'Không tìm thấy yêu cầu đặt lại mật khẩu cho email này.' };
   }
-  if (Date.now() > pending.expiresAt) {
-    return { ok: false, error: 'Mã OTP đã hết hạn. Vui lòng yêu cầu gửi lại mã mới.' }
+  if (!rows[0].is_valid) {
+    return { ok: false, error: 'Mã OTP đã hết hạn. Vui lòng yêu cầu gửi lại mã mới.' };
   }
-  if (pending.code !== cleanCode) {
-    return { ok: false, error: 'Mã OTP không chính xác. Vui lòng kiểm tra lại.' }
+  if (rows[0].otp_code !== cleanCode) {
+    return { ok: false, error: 'Mã OTP không chính xác. Vui lòng kiểm tra lại.' };
   }
 
-  mockPasswordsByEmail[emailLower] = input.newPassword
-  if (mockProfilesByEmail[emailLower]) {
-    mockProfilesByEmail[emailLower].emailVerified = true
-  }
-  delete store.pendingVerificationsByEmail[`reset:${emailLower}`]
+  await sql`
+    UPDATE users
+    SET password_hash = ${input.newPassword}, email_verified = TRUE, updated_at = CURRENT_TIMESTAMP
+    WHERE LOWER(email) = ${emailLower}
+  `;
+  await sql`
+    DELETE FROM email_verifications WHERE email = ${resetKey}
+  `;
 
-  return { ok: true }
+  return { ok: true };
 }
 
 export async function applyToJobAction(input: {
-  jobId: string
-  title: string
-  company: string
-  pay: string
-  place: string
-  schedule: string
-  introduction: string
-  cvId?: string
-  cvName?: string
-  cvUrl?: string
+  jobId: string;
+  title: string;
+  company: string;
+  pay: string;
+  place: string;
+  schedule: string;
+  introduction: string;
+  cvId?: string;
+  cvName?: string;
+  cvUrl?: string;
 }): Promise<ActionResult> {
-  const resolvedCvName = input.cvName || store.currentUser.defaultCvName
-  const resolvedCvUrl = input.cvUrl || store.currentUser.defaultCvUrl
-  const hasCV = Boolean(input.cvId || resolvedCvName || resolvedCvUrl)
-  const employerJob = mockEmployerJobs.find((j) => j.id === input.jobId)
+  const currentUser = await getCurrentSessionUser();
+  const studentEmail = currentUser.email.toLowerCase();
 
-  const newApp = {
-    id: `app-${Date.now()}`,
-    jobId: input.jobId,
-    title: input.title || 'Vị trí công việc ứng tuyển',
-    company: input.company || 'Đơn vị tuyển dụng',
-    employerEmail: employerJob?.employerEmail || 'ntd@gmail.com',
-    date: 'Hôm nay',
-    status: 'pending' as const,
-    studentEmail: store.currentUser.email.toLowerCase(),
-    studentName: store.currentUser.name,
-    studentSchool: 'Sinh viên ứng tuyển',
-    introduction: input.introduction || store.currentUser.bio,
-    pay: input.pay || 'Thỏa thuận',
-    place: input.place || 'TP.HCM',
-    schedule: input.schedule || 'Linh hoạt',
-    openings: 1,
-    hasCV,
-    cvName: resolvedCvName,
-    cvUrl: hasCV ? resolvedCvUrl || SAMPLE_CV_PDF_DATA_URL : undefined,
-  }
+  const resolvedCvName = input.cvName || currentUser.defaultCvName || '';
+  const resolvedCvUrl = input.cvUrl || currentUser.defaultCvUrl || '';
+  const hasCV = Boolean(input.cvId || resolvedCvName || resolvedCvUrl);
 
-  mockApplications.unshift(newApp)
+  const [studentRows, jobRows] = await Promise.all([
+    sql`SELECT id FROM users WHERE LOWER(email) = ${studentEmail} LIMIT 1`,
+    sql`SELECT employer_email FROM jobs WHERE id = ${input.jobId} LIMIT 1`,
+  ]);
 
-  if (employerJob) {
-    employerJob.applicationCount = (employerJob.applicationCount || 0) + 1
-  }
+  const studentId = studentRows[0]?.id || null;
+  const employerEmail = jobRows[0]?.employer_email || 'ntd@gmail.com';
+  const appId = `app-${Date.now()}`;
+  const jobTitle = input.title || 'Vị trí công việc ứng tuyển';
+  const companyName = input.company || 'Đơn vị tuyển dụng';
 
-  pushNotification(store.currentUser.email, {
+  await sql`
+    INSERT INTO applications (
+      id, job_id, student_id, student_email, student_name, student_school,
+      employer_email, job_title, company_name, pay, place, schedule,
+      introduction, has_cv, cv_name, cv_url, status, applied_date_label
+    )
+    VALUES (
+      ${appId}, ${input.jobId}, ${studentId}, ${studentEmail}, ${currentUser.name}, 'Sinh viên ứng tuyển',
+      ${employerEmail}, ${jobTitle}, ${companyName}, ${input.pay || 'Thỏa thuận'},
+      ${input.place || 'TP.HCM'}, ${input.schedule || 'Linh hoạt'},
+      ${input.introduction || currentUser.bio || ''}, ${hasCV}, ${resolvedCvName},
+      ${hasCV ? resolvedCvUrl || SAMPLE_CV_PDF_DATA_URL : ''}, 'pending', 'Hôm nay'
+    )
+  `;
+
+  await sql`
+    UPDATE jobs
+    SET application_count = application_count + 1, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${input.jobId}
+  `;
+
+  await pushNotification(studentEmail, {
     title: 'Đã gửi đơn ứng tuyển thành công',
-    message: `Hồ sơ của bạn cho vị trí "${newApp.title}" tại ${newApp.company} đã được gửi tới nhà tuyển dụng.`,
+    message: `Hồ sơ của bạn cho vị trí "${jobTitle}" tại ${companyName} đã được gửi tới nhà tuyển dụng.`,
     targetPage: 'applications',
-  })
+  });
 
-  pushNotificationToEmployers(employerJob?.employerEmail, newApp.company, {
-    title: `Ứng viên mới: ${store.currentUser.name}`,
-    message: `${store.currentUser.name} vừa ứng tuyển vào vị trí "${newApp.title}". Nhấn để xem hồ sơ ứng viên.`,
+  await pushNotificationToEmployers(employerEmail, companyName, {
+    title: `Ứng viên mới: ${currentUser.name}`,
+    message: `${currentUser.name} vừa ứng tuyển vào vị trí "${jobTitle}". Nhấn để xem hồ sơ ứng viên.`,
     targetPage: 'candidates',
-  })
+  });
 
-  return { ok: true }
+  return { ok: true };
 }
 
 export async function uploadCVAction(
   formData: FormData,
 ): Promise<ActionResult<{ id: string; name: string; url: string }>> {
-  const file = formData.get('file') as File | null
+  const file = formData.get('file') as File | null;
   if (!file) {
     return {
       ok: true,
       data: { id: 'cv-mock-id', name: 'CV_SinhVien.pdf', url: SAMPLE_CV_PDF_DATA_URL },
-    }
+    };
   }
 
-  const arrayBuffer = await file.arrayBuffer()
-  const base64 = Buffer.from(arrayBuffer).toString('base64')
-  const mimeType = file.type || 'application/pdf'
-  const dataUrl = `data:${mimeType};base64,${base64}`
+  const arrayBuffer = await file.arrayBuffer();
+  const base64 = Buffer.from(arrayBuffer).toString('base64');
+  const mimeType = file.type || 'application/pdf';
+  const dataUrl = `data:${mimeType};base64,${base64}`;
 
   return {
     ok: true,
     data: { id: `cv-${Date.now()}`, name: file.name, url: dataUrl },
-  }
+  };
 }
 
 export async function saveJobAction(jobId: string): Promise<ActionResult<{ id: string }>> {
-  const userSaved = getSavedJobsForCurrentUser()
-  const existing = userSaved.find((s) => s.jobId === jobId)
-  if (existing) {
-    return { ok: true, data: { id: existing.id } }
+  const currentUser = await getCurrentSessionUser();
+  const studentEmail = currentUser.email.toLowerCase();
+
+  const existing = await sql`
+    SELECT id FROM saved_jobs WHERE LOWER(student_email) = ${studentEmail} AND job_id = ${jobId} LIMIT 1
+  `;
+  if (existing.length > 0) {
+    return { ok: true, data: { id: existing[0].id } };
   }
-  const newSaved = { id: `saved-${Date.now()}`, jobId }
-  userSaved.push(newSaved)
-  return { ok: true, data: { id: newSaved.id } }
+
+  const newId = `saved-${Date.now()}`;
+  await sql`
+    INSERT INTO saved_jobs (id, student_email, job_id)
+    VALUES (${newId}, ${studentEmail}, ${jobId})
+    ON CONFLICT (student_email, job_id) DO NOTHING
+  `;
+  return { ok: true, data: { id: newId } };
 }
 
 export async function unsaveJobAction(savedJobId: string): Promise<ActionResult> {
-  const userSaved = getSavedJobsForCurrentUser()
-  const index = userSaved.findIndex((s) => s.id === savedJobId || s.jobId === savedJobId)
-  if (index > -1) userSaved.splice(index, 1)
-  return { ok: true }
+  const currentUser = await getCurrentSessionUser();
+  const studentEmail = currentUser.email.toLowerCase();
+
+  await sql`
+    DELETE FROM saved_jobs
+    WHERE LOWER(student_email) = ${studentEmail}
+      AND (id = ${savedJobId} OR job_id = ${savedJobId})
+  `;
+  return { ok: true };
 }
 
 export async function markNotificationReadAction(notificationId: string): Promise<ActionResult> {
-  const userNotifs = getNotificationsForCurrentUser()
-  const notif = userNotifs.find((n) => n.id === notificationId)
-  if (notif) notif.read = true
-  return { ok: true }
+  await sql`
+    UPDATE notifications SET is_read = TRUE WHERE id = ${notificationId}
+  `;
+  return { ok: true };
 }
 
 export async function markAllNotificationsReadAction(): Promise<ActionResult> {
-  const userNotifs = getNotificationsForCurrentUser()
-  userNotifs.forEach((n) => {
-    n.read = true
-  })
-  return { ok: true }
+  const currentUser = await getCurrentSessionUser();
+  await sql`
+    UPDATE notifications SET is_read = TRUE WHERE LOWER(recipient_email) = ${currentUser.email.toLowerCase()}
+  `;
+  return { ok: true };
 }
 
 export async function createReviewAction(input: {
-  applicationId: string
-  rating: number
-  comment: string
+  applicationId: string;
+  rating: number;
+  comment: string;
 }): Promise<ActionResult<{ reviewId: string }>> {
-  const app = mockApplications.find((a) => a.id === input.applicationId)
-  const isEmployer = store.currentUser.role === 'employer'
-  const reviewId = `rev-${Date.now()}`
+  const currentUser = await getCurrentSessionUser();
+  const isEmployer = currentUser.role === 'employer';
+  const reviewId = `rev-${Date.now()}`;
 
-  mockAdminReviews.unshift({
-    id: reviewId,
-    applicationId: input.applicationId,
-    reviewType: isEmployer ? 'employer-to-student' : 'student-to-employer',
-    author: isEmployer
-      ? app?.company || store.currentUser.companyName || store.currentUser.name
-      : app?.studentName || store.currentUser.name,
-    target: isEmployer ? app?.studentName || 'Sinh viên' : app?.company || 'Nhà tuyển dụng',
-    rating: input.rating,
-    content: input.comment,
-    status: isEmployer ? 'Đang hiển thị' : 'Chờ duyệt',
-  })
+  const appRows = await sql`
+    SELECT * FROM applications WHERE id = ${input.applicationId} LIMIT 1
+  `;
+  const app = appRows[0];
+
+  const reviewType = isEmployer ? 'employer-to-student' : 'student-to-employer';
+  const authorName = isEmployer
+    ? app?.company_name || currentUser.companyName || currentUser.name
+    : app?.student_name || currentUser.name;
+  const targetName = isEmployer
+    ? app?.student_name || 'Sinh viên'
+    : app?.company_name || 'Nhà tuyển dụng';
+  const moderationStatus = isEmployer ? 'approved' : 'pending';
+
+  await sql`
+    INSERT INTO reviews (
+      id, application_id, review_type, author_name, target_name,
+      rating, content, moderation_status, review_date_label
+    )
+    VALUES (
+      ${reviewId}, ${input.applicationId}, ${reviewType}, ${authorName}, ${targetName},
+      ${input.rating}, ${input.comment}, ${moderationStatus}, 'Hôm nay'
+    )
+  `;
 
   if (app && isEmployer) {
-    app.employerReview = {
-      id: reviewId,
-      rating: input.rating,
-      comment: input.comment,
-      date: 'Hôm nay',
-      reviewerName: app.company || store.currentUser.companyName || store.currentUser.name,
-      moderationStatus: 'approved',
-    }
-    pushNotification(app.studentEmail, {
+    await pushNotification(app.student_email, {
       title: 'Nhà tuyển dụng đã đánh giá ca làm của bạn',
-      message: `${app.company} đã đánh giá ${input.rating} sao cho vị trí "${app.title}". Nhấn để xem nhận xét.`,
+      message: `${app.company_name} đã đánh giá ${input.rating} sao cho vị trí "${app.job_title}". Nhấn để xem nhận xét.`,
       targetPage: 'applications',
-    })
+    });
   } else if (app && !isEmployer) {
-    app.studentReview = {
-      id: reviewId,
-      rating: input.rating,
-      comment: input.comment,
-      date: 'Hôm nay',
-      reviewerName: app.studentName || store.currentUser.name,
-      moderationStatus: 'pending',
-    }
-    pushNotification(store.currentUser.email, {
+    await pushNotification(currentUser.email, {
       title: 'Đã gửi đánh giá phản hồi',
-      message: `Bạn đã gửi đánh giá ${input.rating} sao cho ${app.company} (đang chờ quản trị viên duyệt).`,
+      message: `Bạn đã gửi đánh giá ${input.rating} sao cho ${app.company_name} (đang chờ quản trị viên duyệt).`,
       targetPage: 'applications',
-    })
-    pushNotificationToEmployers(app.employerEmail, app.company, {
+    });
+    await pushNotificationToEmployers(app.employer_email, app.company_name, {
       title: 'Sinh viên vừa gửi đánh giá mới',
-      message: `${app.studentName} đã gửi đánh giá ${input.rating} sao cho vị trí "${app.title}" (đang chờ kiểm duyệt).`,
+      message: `${app.student_name} đã gửi đánh giá ${input.rating} sao cho vị trí "${app.job_title}" (đang chờ kiểm duyệt).`,
       targetPage: 'employer',
-    })
+    });
   }
 
-  return { ok: true, data: { reviewId } }
+  return { ok: true, data: { reviewId } };
 }
 
 export async function createJobAction(input: any): Promise<ActionResult<{ id: string }>> {
-  const newJobId = `job-${Date.now()}`
+  const currentUser = await getCurrentSessionUser();
+  const creatorEmail = currentUser.email.toLowerCase();
+
+  const userRows = await sql`
+    SELECT id FROM users WHERE LOWER(email) = ${creatorEmail} LIMIT 1
+  `;
+  const employerId = userRows[0]?.id || null;
+
+  const newJobId = `job-${Date.now()}`;
   const companyName =
     input.companyName ||
-    (store.currentUser.role === 'employer' ? store.currentUser.companyName : '') ||
-    'Đơn vị tuyển dụng'
-  const title = input.title
-  const hourlyMin = Number(input.hourlyMin || 0)
-  const hourlyMax = Number(input.hourlyMax || hourlyMin)
+    (currentUser.role === 'employer' ? currentUser.companyName : '') ||
+    'Đơn vị tuyển dụng';
+  const title = input.title;
+  const hourlyMin = Number(input.hourlyMin || 0);
+  const hourlyMax = Number(input.hourlyMax || hourlyMin);
   const payText =
     hourlyMin && hourlyMax && hourlyMin !== hourlyMax
       ? `${hourlyMin}–${hourlyMax}K / giờ`
-      : `${hourlyMax || hourlyMin || 30}K / giờ`
-  const hourlyRate = (hourlyMin + hourlyMax) / 2 || 30
-  const area = input.location || store.currentUser.companyArea || 'TP. Hồ Chí Minh'
-  const streetAddress = String(input.streetAddress || '').trim()
-  const place = streetAddress ? `${streetAddress}, ${area}` : area
-  const schedule = input.schedule || 'Linh hoạt'
-  const category = input.category || 'F&B / Phục vụ'
-  const description = input.description || ''
-  const requirements = input.requirements || ''
-  const openings = Number(input.openings || 1)
-  const creatorEmail = store.currentUser.email.toLowerCase()
+      : `${hourlyMax || hourlyMin || 30}K / giờ`;
+  const hourlyRate = (hourlyMin + hourlyMax) / 2 || 30;
+  const area = input.location || currentUser.companyArea || 'TP. Hồ Chí Minh';
+  const streetAddress = String(input.streetAddress || '').trim();
+  const place = streetAddress ? `${streetAddress}, ${area}` : area;
+  const schedule = input.schedule || 'Linh hoạt';
+  const category = input.category || 'F&B / Phục vụ';
+  const description = input.description || '';
+  const requirements = input.requirements || '';
+  const openings = Number(input.openings || 1);
 
-  mockEmployerJobs.unshift({
-    id: newJobId,
-    company: companyName,
-    employerEmail: creatorEmail,
-    title,
-    pay: payText,
-    hourlyRate,
-    place,
-    schedule,
-    category,
-    posted: 'Hôm nay',
-    description,
-    requirements,
-    status: 'recruiting',
-    moderationStatus: 'pending',
-    openings,
-    applicationCount: 0,
-  })
+  await sql`
+    INSERT INTO jobs (
+      id, employer_id, employer_email, company, title, pay, hourly_rate,
+      place, schedule, category, description, requirements, openings,
+      application_count, status, moderation_status, posted_label
+    )
+    VALUES (
+      ${newJobId}, ${employerId}, ${creatorEmail}, ${companyName}, ${title}, ${payText}, ${hourlyRate},
+      ${place}, ${schedule}, ${category}, ${description}, ${requirements}, ${openings},
+      0, 'recruiting', 'pending', 'Hôm nay'
+    )
+  `;
 
-  mockAdminJobs.unshift({
-    id: newJobId,
-    title,
-    company: companyName,
-    pay: payText,
-    hourlyRate,
-    place,
-    schedule,
-    category,
-    posted: 'Hôm nay',
-    description,
-    requirements,
-    openings,
-    status: 'Chờ duyệt',
-  })
-
-  pushNotification(creatorEmail, {
+  await pushNotification(creatorEmail, {
     title: 'Tin tuyển dụng đang chờ kiểm duyệt',
     message: `Tin "${title}" đã được tạo thành công và đang chờ quản trị viên phê duyệt.`,
     targetPage: 'employer',
-  })
+  });
 
-  return { ok: true, data: { id: newJobId } }
+  return { ok: true, data: { id: newJobId } };
 }
 
 export async function updateEmployerJobStatusAction(input: {
-  jobId: string
-  status: 'recruiting' | 'paused'
+  jobId: string;
+  status: 'recruiting' | 'paused';
 }): Promise<ActionResult> {
-  const employerJob = mockEmployerJobs.find((j) => j.id === input.jobId)
-  if (!employerJob) {
-    return { ok: false, error: 'Không tìm thấy công việc.' }
-  }
-  employerJob.status = input.status
+  const currentUser = await getCurrentSessionUser();
+  const updated = await sql`
+    UPDATE jobs
+    SET status = ${input.status}, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${input.jobId}
+    RETURNING title
+  `;
 
-  pushNotification(store.currentUser.email, {
-    title:
-      input.status === 'paused'
-        ? 'Đã dừng tuyển công việc'
-        : 'Đã mở lại tuyển dụng',
+  if (updated.length === 0) {
+    return { ok: false, error: 'Không tìm thấy công việc.' };
+  }
+
+  await pushNotification(currentUser.email, {
+    title: input.status === 'paused' ? 'Đã dừng tuyển công việc' : 'Đã mở lại tuyển dụng',
     message:
       input.status === 'paused'
-        ? `Tin "${employerJob.title}" đã chuyển sang trạng thái Dừng tuyển và tạm ẩn khỏi danh sách tìm việc.`
-        : `Tin "${employerJob.title}" đã mở lại trạng thái Đang tuyển.`,
+        ? `Tin "${updated[0].title}" đã chuyển sang trạng thái Dừng tuyển và tạm ẩn khỏi danh sách tìm việc.`
+        : `Tin "${updated[0].title}" đã mở lại trạng thái Đang tuyển.`,
     targetPage: 'employer',
-  })
+  });
 
-  return { ok: true }
+  return { ok: true };
 }
 
 export async function updateApplicationStatusAction(input: {
-  applicationId: string
-  status: 'hired' | 'rejected' | 'completed'
+  applicationId: string;
+  status: 'hired' | 'rejected' | 'completed';
 }): Promise<ActionResult> {
-  const app = mockApplications.find((a) => a.id === input.applicationId)
-  if (app) {
-    app.status = input.status
-    const employerJob = mockEmployerJobs.find((j) => j.id === app.jobId)
-    if (employerJob) {
-      if (input.status === 'hired') employerJob.status = 'filled'
-      if (input.status === 'completed') employerJob.status = 'completed'
-    }
+  const appRows = await sql`
+    UPDATE applications
+    SET status = ${input.status}, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${input.applicationId}
+    RETURNING *
+  `;
 
+  if (appRows.length > 0) {
+    const app = appRows[0];
     if (input.status === 'hired') {
-      pushNotification(app.studentEmail, {
+      await sql`UPDATE jobs SET status = 'filled', updated_at = CURRENT_TIMESTAMP WHERE id = ${app.job_id}`;
+      await pushNotification(app.student_email, {
         title: 'Chúc mừng! Bạn đã được nhận việc',
-        message: `${app.company} đã duyệt hồ sơ và nhận bạn vào vị trí "${app.title}".`,
+        message: `${app.company_name} đã duyệt hồ sơ và nhận bạn vào vị trí "${app.job_title}".`,
         targetPage: 'applications',
-      })
+      });
     } else if (input.status === 'rejected') {
-      pushNotification(app.studentEmail, {
+      await pushNotification(app.student_email, {
         title: 'Cập nhật kết quả ứng tuyển',
-        message: `Đơn ứng tuyển vị trí "${app.title}" tại ${app.company} chưa được chọn trong đợt này.`,
+        message: `Đơn ứng tuyển vị trí "${app.job_title}" tại ${app.company_name} chưa được chọn trong đợt này.`,
         targetPage: 'applications',
-      })
+      });
     } else if (input.status === 'completed') {
-      pushNotification(app.studentEmail, {
+      await sql`UPDATE jobs SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ${app.job_id}`;
+      await pushNotification(app.student_email, {
         title: 'Công việc đã được xác nhận hoàn thành',
-        message: `${app.company} đã xác nhận hoàn thành ca làm "${app.title}". Hãy kiểm tra đánh giá và phản hồi lại.`,
+        message: `${app.company_name} đã xác nhận hoàn thành ca làm "${app.job_title}". Hãy kiểm tra đánh giá và phản hồi lại.`,
         targetPage: 'applications',
-      })
+      });
     }
   }
-  return { ok: true }
+
+  return { ok: true };
 }
 
 export async function moderateJobAction(input: {
-  jobId: string
-  status: 'approved' | 'rejected'
+  jobId: string;
+  status: 'approved' | 'rejected';
 }): Promise<ActionResult> {
-  const adminIndex = mockAdminJobs.findIndex((j) => j.id === input.jobId)
-  if (adminIndex > -1) {
-    mockAdminJobs.splice(adminIndex, 1)
-  }
+  const updated = await sql`
+    UPDATE jobs
+    SET moderation_status = ${input.status}, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${input.jobId}
+    RETURNING employer_email, company, title
+  `;
 
-  const employerJob = mockEmployerJobs.find((j) => j.id === input.jobId)
-  if (employerJob) {
-    employerJob.moderationStatus = input.status
-    pushNotificationToEmployers(employerJob.employerEmail, employerJob.company, {
+  if (updated.length > 0) {
+    const job = updated[0];
+    await pushNotificationToEmployers(job.employer_email, job.company, {
       title:
         input.status === 'approved'
           ? 'Tin tuyển dụng đã được duyệt'
           : 'Tin tuyển dụng bị từ chối',
       message:
         input.status === 'approved'
-          ? `Tin "${employerJob.title}" đã được duyệt và hiển thị công khai cho sinh viên ứng tuyển.`
-          : `Tin "${employerJob.title}" không đạt yêu cầu kiểm duyệt. Vui lòng kiểm tra lại nội dung.`,
+          ? `Tin "${job.title}" đã được duyệt và hiển thị công khai cho sinh viên ứng tuyển.`
+          : `Tin "${job.title}" không đạt yêu cầu kiểm duyệt. Vui lòng kiểm tra lại nội dung.`,
       targetPage: 'employer',
-    })
+    });
   }
 
-  return { ok: true }
+  return { ok: true };
 }
 
 export async function updateUserAction(input: any): Promise<ActionResult> {
-  return { ok: true }
+  if (input?.userId && typeof input.active === 'boolean') {
+    await sql`
+      UPDATE users SET active = ${input.active}, updated_at = CURRENT_TIMESTAMP WHERE id = ${input.userId}
+    `;
+  }
+  return { ok: true };
 }
 
 export async function createAdminAction(input: any): Promise<ActionResult<{ id: string }>> {
-  return { ok: true, data: { id: 'admin-id' } }
+  return { ok: true, data: { id: 'admin-id' } };
 }
 
 export async function updateReviewAction(input: {
-  reviewId: string
-  visibility?: 'hidden' | 'visible'
-  action?: 'delete'
+  reviewId: string;
+  visibility?: 'hidden' | 'visible';
+  action?: 'delete';
 }): Promise<ActionResult> {
-  const index = mockAdminReviews.findIndex((r) => r.id === input.reviewId)
-  if (index > -1) {
-    const reviewItem = mockAdminReviews[index]
-    const linkedApp = reviewItem.applicationId
-      ? mockApplications.find((a) => a.id === reviewItem.applicationId)
-      : mockApplications.find(
-          (a) =>
-            a.studentReview?.id === input.reviewId || a.employerReview?.id === input.reviewId,
-        )
+  const reviewRows = await sql`
+    SELECT * FROM reviews WHERE id = ${input.reviewId} LIMIT 1
+  `;
+  if (reviewRows.length === 0) return { ok: true };
 
-    if (input.action === 'delete') {
-      mockAdminReviews.splice(index, 1)
-      if (linkedApp) {
-        if (
-          reviewItem.reviewType === 'student-to-employer' ||
-          linkedApp.studentReview?.id === input.reviewId
-        ) {
-          delete linkedApp.studentReview
-        }
-        if (
-          reviewItem.reviewType === 'employer-to-student' ||
-          linkedApp.employerReview?.id === input.reviewId
-        ) {
-          delete linkedApp.employerReview
-        }
-      }
-    } else if (input.visibility) {
-      reviewItem.status = input.visibility === 'hidden' ? 'Đã ẩn' : 'Đang hiển thị'
-      if (linkedApp) {
-        if (
-          reviewItem.reviewType === 'student-to-employer' ||
-          linkedApp.studentReview?.id === input.reviewId
-        ) {
-          if (linkedApp.studentReview) {
-            linkedApp.studentReview.moderationStatus =
-              input.visibility === 'visible' ? 'approved' : 'hidden'
-          }
-          if (input.visibility === 'visible') {
-            pushNotificationToEmployers(linkedApp.employerEmail, linkedApp.company, {
-              title: 'Bạn nhận được đánh giá mới từ sinh viên',
-              message: `${linkedApp.studentName} đã đánh giá ${reviewItem.rating} sao cho vị trí "${linkedApp.title}". Nhấn để xem.`,
-              targetPage: 'employer',
-            })
-          }
-        }
-        if (
-          reviewItem.reviewType === 'employer-to-student' ||
-          linkedApp.employerReview?.id === input.reviewId
-        ) {
-          if (linkedApp.employerReview) {
-            linkedApp.employerReview.moderationStatus =
-              input.visibility === 'visible' ? 'approved' : 'hidden'
-          }
-        }
+  const reviewItem = reviewRows[0];
+
+  if (input.action === 'delete') {
+    await sql`DELETE FROM reviews WHERE id = ${input.reviewId}`;
+    return { ok: true };
+  }
+
+  if (input.visibility) {
+    const nextModerationStatus = input.visibility === 'hidden' ? 'hidden' : 'approved';
+    await sql`
+      UPDATE reviews SET moderation_status = ${nextModerationStatus} WHERE id = ${input.reviewId}
+    `;
+
+    if (
+      input.visibility === 'visible' &&
+      reviewItem.review_type === 'student-to-employer' &&
+      reviewItem.application_id
+    ) {
+      const appRows = await sql`
+        SELECT employer_email, company_name, student_name, job_title
+        FROM applications
+        WHERE id = ${reviewItem.application_id}
+        LIMIT 1
+      `;
+      if (appRows.length > 0) {
+        const app = appRows[0];
+        await pushNotificationToEmployers(app.employer_email, app.company_name, {
+          title: 'Bạn nhận được đánh giá mới từ sinh viên',
+          message: `${app.student_name} đã đánh giá ${reviewItem.rating} sao cho vị trí "${app.job_title}". Nhấn để xem.`,
+          targetPage: 'employer',
+        });
       }
     }
   }
-  return { ok: true }
+
+  return { ok: true };
 }
