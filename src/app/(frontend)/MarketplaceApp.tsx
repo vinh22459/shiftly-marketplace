@@ -3692,7 +3692,7 @@ function Admin({
         <span>THAO TÁC</span>
       </div>
       {users.map((user) => (
-        <div className="table-row admin-table" key={user.email}>
+        <div className="table-row admin-table" key={user.id}>
           <div>
             <strong>{user.name}</strong>
             <small>{user.email}</small>
@@ -3701,12 +3701,13 @@ function Admin({
             value={user.role}
             onChange={(e) => {
               const role = e.target.value as AdminUserRow['role']
-              void updateUserAction({ userId: user.id, role }).then((result) => {
+              void updateUserAction({ userId: user.id, role }).then(async (result) => {
                 if (!result.ok) return flash(result.error)
                 setUserList((current) =>
                   current.map((item) => (item.id === user.id ? { ...item, role } : item)),
                 )
                 flash('Đã cập nhật vai trò.')
+                await refreshJobs()
               })
             }}
           >
@@ -3718,17 +3719,22 @@ function Admin({
             {user.active ? 'Hoạt động' : 'Đã khóa'}
           </span>
           <button
+            type="button"
             onClick={() => {
-              const accountStatus = user.active ? 'suspended' : 'active'
-              void updateUserAction({ userId: user.id, accountStatus }).then((result) => {
-                if (!result.ok) return flash(result.error)
-                setUserList((current) =>
-                  current.map((item) =>
-                    item.id === user.id ? { ...item, active: !item.active } : item,
-                  ),
-                )
-                flash(user.active ? 'Đã khóa tài khoản.' : 'Đã mở khóa tài khoản.')
-              })
+              const nextActive = !user.active
+              const accountStatus = nextActive ? 'active' : 'suspended'
+              void updateUserAction({ userId: user.id, accountStatus, active: nextActive }).then(
+                async (result) => {
+                  if (!result.ok) return flash(result.error)
+                  setUserList((current) =>
+                    current.map((item) =>
+                      item.id === user.id ? { ...item, active: nextActive } : item,
+                    ),
+                  )
+                  flash(nextActive ? 'Đã mở khóa tài khoản.' : 'Đã khóa tài khoản.')
+                  await refreshJobs()
+                },
+              )
             }}
           >
             {user.active ? 'Khóa' : 'Mở khóa'}

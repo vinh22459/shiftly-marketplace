@@ -1241,12 +1241,37 @@ export async function moderateJobAction(input: {
   return { ok: true };
 }
 
-export async function updateUserAction(input: any): Promise<ActionResult> {
-  if (input?.userId && typeof input.active === 'boolean') {
+export async function updateUserAction(input: {
+  userId?: string;
+  role?: 'student' | 'employer' | 'admin';
+  accountStatus?: 'active' | 'suspended';
+  active?: boolean;
+}): Promise<ActionResult> {
+  if (!input?.userId) return { ok: false, error: 'Thiếu mã người dùng.' };
+
+  if (input.role) {
     await sql`
-      UPDATE users SET active = ${input.active}, updated_at = CURRENT_TIMESTAMP WHERE id = ${input.userId}
+      UPDATE users
+      SET role = ${input.role}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${input.userId}
     `;
   }
+
+  if (typeof input.accountStatus === 'string') {
+    const isActive = input.accountStatus === 'active';
+    await sql`
+      UPDATE users
+      SET active = ${isActive}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${input.userId}
+    `;
+  } else if (typeof input.active === 'boolean') {
+    await sql`
+      UPDATE users
+      SET active = ${input.active}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${input.userId}
+    `;
+  }
+
   return { ok: true };
 }
 
