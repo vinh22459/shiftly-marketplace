@@ -4376,7 +4376,7 @@ function Footer({ go }: { go: (page: Page) => void }) {
           color: '#adc3b7',
         }}
       >
-        <span>© 2026 Shiftly. Nhóm GR7, Trường Đại học Văn Lang.</span>
+        <span>© 2026 Shiftly. Nhóm VTK06, Trường Đại học Văn Lang.</span>
         <span>Đồ án Chuyên đề tốt nghiệp 2</span>
       </div>
 
