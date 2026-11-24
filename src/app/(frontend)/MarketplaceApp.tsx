@@ -965,9 +965,24 @@ function FindJobs({
             <span>
               Đang hiển thị {Math.min(visible, filtered.length)} trong {filtered.length} cơ hội
             </span>
-            {visible < filtered.length && (
-              <button onClick={() => setVisible(filtered.length)}>Xem thêm việc làm</button>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              {visible > 6 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVisible(6)
+                    window.scrollTo({ top: 0, behavior: 'smooth' })
+                  }}
+                >
+                  Thu gọn
+                </button>
+              )}
+              {visible < filtered.length && (
+                <button type="button" onClick={() => setVisible(filtered.length)}>
+                  Xem thêm việc làm
+                </button>
+              )}
+            </div>
           </div>
         </div>
         <aside className="right-rail">
