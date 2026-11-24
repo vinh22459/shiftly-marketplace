@@ -3650,7 +3650,7 @@ function Admin({
             const email = String(form.get('email') || '')
             const password = String(form.get('password') || '')
             if (!email || !password) return
-            void createAdminAction({ email, password }).then((result) => {
+            void createAdminAction({ email, password }).then(async (result) => {
               if (!result.ok) {
                 flash(result.error)
                 return
@@ -3667,6 +3667,7 @@ function Admin({
               ])
               setInviteOpen(false)
               flash('Đã tạo tài khoản quản trị viên.')
+              await refreshJobs()
             })
           }}
         >
@@ -3723,18 +3724,20 @@ function Admin({
             onClick={() => {
               const nextActive = !user.active
               const accountStatus = nextActive ? 'active' : 'suspended'
-              void updateUserAction({ userId: user.id, accountStatus, active: nextActive }).then(
-                async (result) => {
-                  if (!result.ok) return flash(result.error)
-                  setUserList((current) =>
-                    current.map((item) =>
-                      item.id === user.id ? { ...item, active: nextActive } : item,
-                    ),
-                  )
-                  flash(nextActive ? 'Đã mở khóa tài khoản.' : 'Đã khóa tài khoản.')
-                  await refreshJobs()
-                },
-              )
+              void updateUserAction({
+                userId: user.id,
+                accountStatus,
+                active: nextActive,
+              }).then(async (result) => {
+                if (!result.ok) return flash(result.error)
+                setUserList((current) =>
+                  current.map((item) =>
+                    item.id === user.id ? { ...item, active: nextActive } : item,
+                  ),
+                )
+                flash(nextActive ? 'Đã mở khóa tài khoản.' : 'Đã khóa tài khoản.')
+                await refreshJobs()
+              })
             }}
           >
             {user.active ? 'Khóa' : 'Mở khóa'}
@@ -4160,6 +4163,199 @@ function Login({
         <small>Phiên đăng nhập được bảo vệ bằng cookie HTTP-only.</small>
       </form>
     </main>
+  )
+}
+
+function Footer({ go }: { go: (page: Page) => void }) {
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  return (
+    <footer
+      style={{
+        backgroundColor: '#114232',
+        color: '#e6eee9',
+        marginTop: '64px',
+        padding: '52px 24px 28px',
+        position: 'relative',
+      }}
+    >
+      <div
+        style={{
+          maxWidth: '1160px',
+          margin: '0 auto',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+          gap: '36px',
+          paddingBottom: '36px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.14)',
+        }}
+      >
+        <div>
+          <div style={{ fontSize: '22px', fontWeight: 800, letterSpacing: '-0.02em', marginBottom: '12px' }}>
+            <span style={{ color: '#ffffff' }}>shiftly</span>
+            <span style={{ color: '#d7ee9b' }}>SV</span>
+          </div>
+          <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.65, color: '#c4d5cc' }}>
+            Nền tảng kết nối sinh viên với việc làm bán thời gian gần trường, lương rõ ràng, ca linh hoạt.
+          </p>
+        </div>
+
+        <div>
+          <h4
+            style={{
+              margin: '0 0 14px',
+              fontSize: '13px',
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              color: '#d7ee9b',
+            }}
+          >
+            SINH VIÊN
+          </h4>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '10px', fontSize: '14px' }}>
+            <li>
+              <button
+                type="button"
+                onClick={() => go('jobs')}
+                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+              >
+                Tìm việc làm
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                onClick={() => go('applications')}
+                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+              >
+                Đơn ứng tuyển của tôi
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                onClick={() => go('signup')}
+                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+              >
+                Tạo tài khoản
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <h4
+            style={{
+              margin: '0 0 14px',
+              fontSize: '13px',
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              color: '#d7ee9b',
+            }}
+          >
+            NHÀ TUYỂN DỤNG
+          </h4>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '10px', fontSize: '14px' }}>
+            <li>
+              <button
+                type="button"
+                onClick={() => go('post-job')}
+                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+              >
+                Đăng tin tuyển dụng
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                onClick={() => go('employer')}
+                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+              >
+                Quản lý tin đã đăng
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                onClick={() => go('signup')}
+                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+              >
+                Tạo tài khoản
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <h4
+            style={{
+              margin: '0 0 14px',
+              fontSize: '13px',
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              color: '#d7ee9b',
+            }}
+          >
+            LIÊN HỆ
+          </h4>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '10px', fontSize: '14px', color: '#e6eee9' }}>
+            <li>Facebook</li>
+            <li>Email: nhom7@gmail.com</li>
+            <li>SĐT: 0123 456 789</li>
+            <li style={{ lineHeight: 1.55 }}>
+              Địa chỉ: 69/68 Đặng Thùy Trâm, P. Bình Lợi Trung, TP. Hồ Chí Minh
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div
+        style={{
+          maxWidth: '1160px',
+          margin: '20px auto 0',
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '12px',
+          fontSize: '13px',
+          color: '#adc3b7',
+        }}
+      >
+        <span>© 2026 Shiftly. Nhóm GR7, Trường Đại học Văn Lang.</span>
+        <span>Đồ án Chuyên đề tốt nghiệp 2</span>
+      </div>
+
+      <button
+        type="button"
+        onClick={scrollToTop}
+        aria-label="Lên đầu trang"
+        title="Lên đầu trang"
+        style={{
+          position: 'fixed',
+          right: '22px',
+          bottom: '22px',
+          width: '42px',
+          height: '42px',
+          borderRadius: '999px',
+          border: '1px solid rgba(255,255,255,0.2)',
+          backgroundColor: '#1a5c46',
+          color: '#ffffff',
+          fontSize: '18px',
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.2)',
+          zIndex: 40,
+        }}
+      >
+        ↑
+      </button>
+    </footer>
   )
 }
 
@@ -4661,6 +4857,7 @@ export default function App({
           refreshJobs={syncDataFromSession}
         />
       )}
+      <Footer go={go} />
     </div>
   )
 }
