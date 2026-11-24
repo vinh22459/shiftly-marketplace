@@ -4302,8 +4302,8 @@ function Footer({ go }: { go: (page: Page) => void }) {
           </h4>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '10px', fontSize: '14px', color: '#e6eee9' }}>
             <li>Facebook</li>
-            <li>Email: nhom7@gmail.com</li>
-            <li>SĐT: 0123 456 789</li>
+            <li>Email: nhom6@gmail.com</li>
+            <li>SĐT: 0777772405</li>
             <li style={{ lineHeight: 1.55 }}>
               Địa chỉ: 69/68 Đặng Thùy Trâm, P. Bình Lợi Trung, TP. Hồ Chí Minh
             </li>
