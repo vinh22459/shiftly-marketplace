@@ -2132,3 +2132,27 @@ input:checked + .fake-check {
     border-radius: 8px !important;
   }
 }
+/* Đưa logo sang trái, các chức năng dồn về bên phải trên màn hình lớn */
+@media (min-width: 769px) {
+  .site-header .header-inner {
+    justify-content: space-between;
+    gap: 20px;
+  }
+
+  .site-header .wordmark {
+    width: auto !important;
+    flex-shrink: 0;
+  }
+
+  .site-header nav {
+    margin-left: auto !important;
+    justify-content: flex-end !important;
+    gap: 12px !important;
+  }
+
+  .site-header .header-right {
+    margin-left: 0 !important;
+    flex-shrink: 0;
+    gap: 14px;
+  }
+}
