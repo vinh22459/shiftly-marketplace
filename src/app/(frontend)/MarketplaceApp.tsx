@@ -441,32 +441,54 @@ function Header({
             ['profile', 'Hồ sơ'],
           ]
   return (
-    <header className="site-header">
+    <header
+      className="site-header"
+      style={{
+        backgroundColor: '#114232',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.14)',
+        color: '#ffffff',
+      }}
+    >
       <div className="header-inner">
-        <button className="mobile-trigger" onClick={() => setOpen(!open)}>
+        <button
+          className="mobile-trigger"
+          onClick={() => setOpen(!open)}
+          style={{ color: '#ffffff' }}
+        >
           {open ? <X size={20} /> : <Menu size={20} />}
         </button>
         <button
           className="wordmark"
           onClick={() => go(employer ? 'employer' : admin ? 'admin' : 'jobs')}
+          style={{ color: '#ffffff' }}
         >
-          <strong>shiftly</strong>
-          <span>LÀM VIỆC, QUANH BẠN.</span>
+          <strong style={{ color: '#ffffff' }}>shiftly</strong>
+          <span style={{ color: '#d7ee9b' }}>LÀM VIỆC, QUANH BẠN.</span>
         </button>
         {!authPage && (
           <nav className={open ? 'open' : ''}>
-            {links.map(([id, label]) => (
-              <button
-                key={`${id}-${label}`}
-                className={page === id ? 'active' : ''}
-                onClick={() => {
-                  go(id)
-                  setOpen(false)
-                }}
-              >
-                {label}
-              </button>
-            ))}
+            {links.map(([id, label]) => {
+              const isActive = page === id
+              return (
+                <button
+                  key={`${id}-${label}`}
+                  className={isActive ? 'active' : ''}
+                  onClick={() => {
+                    go(id)
+                    setOpen(false)
+                  }}
+                  style={{
+                    color: isActive ? '#114232' : '#e6eee9',
+                    backgroundColor: isActive ? '#d7ee9b' : 'transparent',
+                    borderRadius: '999px',
+                    padding: '6px 14px',
+                    fontWeight: isActive ? 700 : 500,
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
           </nav>
         )}
         <div className="header-right">
@@ -475,12 +497,26 @@ function Header({
               <button
                 className="notification"
                 onClick={() => go(page === 'login' ? 'jobs' : 'login')}
+                style={{
+                  backgroundColor: '#d7ee9b',
+                  color: '#114232',
+                  border: 'none',
+                  fontWeight: 700,
+                }}
               >
                 {page === 'login' ? 'Tìm việc' : 'Đăng nhập'}
               </button>
             </>
           ) : admin ? (
-            <button className="notification" onClick={logout}>
+            <button
+              className="notification"
+              onClick={logout}
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.12)',
+                color: '#ffffff',
+                borderColor: 'rgba(255,255,255,0.25)',
+              }}
+            >
               Đăng xuất
             </button>
           ) : (
@@ -491,7 +527,9 @@ function Header({
                   className="notification"
                   onClick={() => setNotifOpen((prev) => !prev)}
                   style={{
-                    borderColor: unreadCount > 0 ? '#114232' : undefined,
+                    backgroundColor: unreadCount > 0 ? '#d7ee9b' : 'rgba(255,255,255,0.12)',
+                    color: unreadCount > 0 ? '#114232' : '#ffffff',
+                    borderColor: unreadCount > 0 ? '#d7ee9b' : 'rgba(255,255,255,0.25)',
                     fontWeight: unreadCount > 0 ? 700 : 600,
                   }}
                 >
@@ -511,6 +549,7 @@ function Header({
                       boxShadow: '0 14px 32px rgba(17, 66, 50, 0.14)',
                       zIndex: 50,
                       overflow: 'hidden',
+                      color: '#141715',
                     }}
                   >
                     <div
@@ -602,7 +641,11 @@ function Header({
                   </div>
                 )}
               </div>
-              <button className="profile-link" onClick={logout}>
+              <button
+                className="profile-link"
+                onClick={logout}
+                style={{ color: '#e6eee9', fontWeight: 600 }}
+              >
                 Đăng xuất
               </button>
             </>
@@ -625,11 +668,20 @@ function Hero({
   action?: React.ReactNode
 }) {
   return (
-    <section className="hero workspace-hero">
+    <section
+      className="hero workspace-hero"
+      style={{
+        backgroundColor: '#114232',
+        color: '#ffffff',
+        borderRadius: '14px',
+        padding: '32px 36px',
+        marginTop: '20px',
+      }}
+    >
       <div>
-        <span>{eyebrow}</span>
-        <h1>{title}</h1>
-        <p>{copy}</p>
+        <span style={{ color: '#d7ee9b', fontWeight: 700 }}>{eyebrow}</span>
+        <h1 style={{ color: '#ffffff' }}>{title}</h1>
+        <p style={{ color: '#d5e3dc' }}>{copy}</p>
       </div>
       {action}
     </section>
@@ -4302,8 +4354,8 @@ function Footer({ go }: { go: (page: Page) => void }) {
           </h4>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '10px', fontSize: '14px', color: '#e6eee9' }}>
             <li>Facebook</li>
-            <li>Email: nhom6@gmail.com</li>
-            <li>SĐT: 0777772405</li>
+            <li>Email: nhom7@gmail.com</li>
+            <li>SĐT: 0123 456 789</li>
             <li style={{ lineHeight: 1.55 }}>
               Địa chỉ: 69/68 Đặng Thùy Trâm, P. Bình Lợi Trung, TP. Hồ Chí Minh
             </li>
