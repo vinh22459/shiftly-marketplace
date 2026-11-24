@@ -2132,12 +2132,13 @@ input:checked + .fake-check {
     border-radius: 8px !important;
   }
 }
-/* Đẩy logo sát góc trái và toàn bộ chức năng sát góc phải màn hình */
+/* Đẩy logo sát góc trái và cụm nút bên phải gọn gàng, không bị thanh cuộn che */
 @media (min-width: 769px) {
   .site-header .header-inner {
+    box-sizing: border-box !important;
     width: 100% !important;
     max-width: 100% !important;
-    padding: 0 28px !important;
+    padding: 0 40px 0 28px !important;
     justify-content: space-between;
     gap: 20px;
   }
