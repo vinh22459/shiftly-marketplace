@@ -781,10 +781,11 @@ function FindJobs({
 }) {
   const [draftQuery, setDraftQuery] = useState('')
   const [appliedQuery, setAppliedQuery] = useState('')
+  const [draftLocation, setDraftLocation] = useState('Tất cả tỉnh / thành phố')
+  const [appliedLocation, setAppliedLocation] = useState('Tất cả tỉnh / thành phố')
   const [showDropdown, setShowDropdown] = useState(false)
   const [searchHistory, setSearchHistory] = useState<string[]>([])
   const [category, setCategory] = useState('Tất cả ngành nghề')
-  const [location, setLocation] = useState('Tất cả tỉnh / thành phố')
   const [salary, setSalary] = useState('all')
   const [visible, setVisible] = useState(6)
 
@@ -852,10 +853,12 @@ function FindJobs({
     }
   }
 
-  const executeSearch = (keyword: string) => {
+  const executeSearch = (keyword: string, nextLocation = draftLocation) => {
     const clean = keyword.trim()
     setDraftQuery(clean)
     setAppliedQuery(clean)
+    setDraftLocation(nextLocation)
+    setAppliedLocation(nextLocation)
     setShowDropdown(false)
     setVisible(6)
     if (clean) {
@@ -895,19 +898,37 @@ function FindJobs({
 
   const matchesProvince = (place: string, selectedProvince: string) => {
     if (selectedProvince === 'Tất cả tỉnh / thành phố') return true
+
     const normalize = (str: string) =>
       str
         .toLowerCase()
-        .replace(/tp\.?\s*hồ chí minh|tp\.?\s*hcm|tphcm/g, 'ho chi minh')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/tp\.?\s*ho chi minh|tp\.?\s*hcm|tphcm|sai gon|thu duc/g, 'ho chi minh')
+        .replace(/vung tau/g, 'ba ria - vung tau')
+        .replace(/nha trang/g, 'khanh hoa')
+        .replace(/da lat/g, 'lam dong')
+        .replace(/bien hoa/g, 'dong nai')
+        .replace(/thu dau mot|di an|thuan an/g, 'binh duong')
+        .replace(/ha long/g, 'quang ninh')
+        .replace(/buon ma thuot/g, 'dak lak')
+        .replace(/pleiku/g, 'gia lai')
+        .replace(/quy nhon/g, 'binh dinh')
+        .replace(/long xuyen/g, 'an giang')
+        .replace(/my tho/g, 'tien giang')
+        .replace(/rach gia|phu quoc/g, 'kien giang')
         .replace(/tp\.?\s*/g, '')
-        .replace(/thành phố\s*/g, '')
-        .replace(/tỉnh\s*/g, '')
+        .replace(/thanh pho\s*/g, '')
+        .replace(/tinh\s*/g, '')
         .trim()
+
     const target = normalize(selectedProvince)
+    const normalizedPlace = normalize(place)
     const parts = place.split(',').map((part) => normalize(part))
     return (
       parts.some((p) => p === target || p.includes(target)) ||
-      normalize(place).includes(target)
+      normalizedPlace.includes(target)
     )
   }
 
@@ -918,7 +939,7 @@ function FindJobs({
           .toLowerCase()
           .includes(appliedQuery.trim().toLowerCase())
         const matchedCategory = category === 'Tất cả ngành nghề' || job.category === category
-        const area = matchesProvince(job.place, location)
+        const area = matchesProvince(job.place, appliedLocation)
         const pay =
           salary === 'all' ||
           (salary === 'under-30' && job.hourlyRate < 30) ||
@@ -926,7 +947,7 @@ function FindJobs({
           (salary === 'over-45' && job.hourlyRate > 45)
         return text && matchedCategory && area && pay
       }),
-    [jobs, appliedQuery, category, location, salary],
+    [jobs, appliedQuery, category, appliedLocation, salary],
   )
 
   const hasDropdownContent =
@@ -965,7 +986,7 @@ function FindJobs({
                     setShowDropdown(false)
                   } else if (e.key === 'Enter') {
                     e.preventDefault()
-                    executeSearch(draftQuery)
+                    executeSearch(draftQuery, draftLocation)
                   }
                 }}
                 placeholder="Pha chế, Gia sư, Bán hàng, Marketing, Sự kiện..."
@@ -1062,7 +1083,7 @@ function FindJobs({
                     >
                       <button
                         type="button"
-                        onClick={() => executeSearch(item)}
+                        onClick={() => executeSearch(item, draftLocation)}
                         style={{
                           flex: 1,
                           display: 'flex',
@@ -1122,7 +1143,7 @@ function FindJobs({
                       <button
                         key={`${item.label}-${idx}`}
                         type="button"
-                        onClick={() => executeSearch(item.keyword)}
+                        onClick={() => executeSearch(item.keyword, draftLocation)}
                         style={{
                           width: '100%',
                           display: 'flex',
@@ -1153,7 +1174,7 @@ function FindJobs({
                   ) : (
                     <button
                       type="button"
-                      onClick={() => executeSearch(draftQuery)}
+                      onClick={() => executeSearch(draftQuery, draftLocation)}
                       style={{
                         width: '100%',
                         padding: '11px 14px',
@@ -1176,10 +1197,9 @@ function FindJobs({
         <label className="location-field">
           <span>Tỉnh / Thành phố</span>
           <select
-            value={location}
+            value={draftLocation}
             onChange={(e) => {
-              setLocation(e.target.value)
-              setVisible(6)
+              setDraftLocation(e.target.value)
             }}
           >
             {locations.map((item) => (
@@ -1189,7 +1209,7 @@ function FindJobs({
             ))}
           </select>
         </label>
-        <button type="button" onClick={() => executeSearch(draftQuery)}>
+        <button type="button" onClick={() => executeSearch(draftQuery, draftLocation)}>
           <Search size={15} /> Tìm việc
         </button>
       </section>
@@ -1200,9 +1220,10 @@ function FindJobs({
             setCategory(v)
             setVisible(6)
           }}
-          location={location}
+          location={appliedLocation}
           setLocation={(v) => {
-            setLocation(v)
+            setDraftLocation(v)
+            setAppliedLocation(v)
             setVisible(6)
           }}
           salary={salary}
@@ -1213,9 +1234,10 @@ function FindJobs({
           onResetAll={() => {
             setDraftQuery('')
             setAppliedQuery('')
+            setDraftLocation('Tất cả tỉnh / thành phố')
+            setAppliedLocation('Tất cả tỉnh / thành phố')
             setShowDropdown(false)
             setCategory('Tất cả ngành nghề')
-            setLocation('Tất cả tỉnh / thành phố')
             setSalary('all')
             setVisible(6)
           }}
@@ -1226,7 +1248,11 @@ function FindJobs({
               {appliedQuery
                 ? `${filtered.length} kết quả cho "${appliedQuery}"`
                 : `${filtered.length} việc làm`}
-              {location !== 'Tất cả tỉnh / thành phố' ? ` tại ${location}` : !appliedQuery ? ' trên toàn quốc' : ''}
+              {appliedLocation !== 'Tất cả tỉnh / thành phố'
+                ? ` tại ${appliedLocation}`
+                : !appliedQuery
+                  ? ' trên toàn quốc'
+                  : ''}
             </h2>
             <span>
               Sắp xếp: <strong>Đề xuất</strong> <ChevronDown size={12} />
