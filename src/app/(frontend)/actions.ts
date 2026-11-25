@@ -18,6 +18,7 @@ export type PendingModerationJob = {
   schedule: string;
   category: string;
   posted: string;
+  createdAt?: string;
   description: string;
   requirements: string;
   openings: number;
@@ -72,6 +73,49 @@ const SESSION_COOKIE_NAME = 'shiftly_user_email';
 const DEFAULT_SESSION_EMAIL = 'vinh@vanlang.edu.vn';
 const DEMO_STUDENT_EMAILS = ['vinh@vanlang.edu.vn', 'sv@gmail.com'];
 const DEMO_EMPLOYER_EMAILS = ['hr@doitac.vn', 'ntd@gmail.com'];
+
+function toIsoDateString(value: unknown): string | undefined {
+  if (!value) return undefined;
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString();
+}
+
+function formatDynamicPostedLabel(createdAtValue: unknown, fallbackLabel?: string | null): string {
+  if (!createdAtValue) {
+    return fallbackLabel || 'Hôm nay';
+  }
+  const createdDate =
+    createdAtValue instanceof Date ? createdAtValue : new Date(String(createdAtValue));
+  if (Number.isNaN(createdDate.getTime())) {
+    return fallbackLabel || 'Hôm nay';
+  }
+
+  const diffMs = Date.now() - createdDate.getTime();
+  if (diffMs < 0) {
+    return 'Vừa xong';
+  }
+
+  const minutes = Math.floor(diffMs / (1000 * 60));
+  if (minutes < 1) return 'Vừa xong';
+  if (minutes < 60) return `${minutes} phút trước`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} giờ trước`;
+
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'Hôm qua';
+  if (days < 7) return `${days} ngày trước`;
+
+  const weeks = Math.floor(days / 7);
+  if (weeks < 4) return `${weeks} tuần trước`;
+
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} tháng trước`;
+
+  const years = Math.floor(days / 365);
+  return `${years} năm trước`;
+}
 
 const SAMPLE_CV_PDF_DATA_URL =
   'data:application/pdf;base64,' +
@@ -234,6 +278,7 @@ async function dispatchVerificationEmail(
     };
   }
 }
+
 async function dispatchHiredEmail(params: {
   studentEmail: string;
   studentName: string;
@@ -282,6 +327,7 @@ async function dispatchHiredEmail(params: {
     console.error('[SHIFTLY HIRED EMAIL ERROR]', err);
   }
 }
+
 async function pushNotification(
   targetEmail: string,
   payload: Omit<NotificationItem, 'id' | 'read' | 'date'>,
@@ -423,7 +469,7 @@ export async function getMarketplaceSessionAction(): Promise<ActionResult<any>> 
       id: r.id,
       rating: Number(r.rating),
       comment: r.content || '',
-      date: r.review_date_label || 'Hôm nay',
+      date: formatDynamicPostedLabel(r.created_at, r.review_date_label || 'Hôm nay'),
       reviewerName: r.author_name,
       moderationStatus: r.moderation_status as 'pending' | 'approved' | 'hidden',
     };
@@ -434,24 +480,28 @@ export async function getMarketplaceSessionAction(): Promise<ActionResult<any>> 
     }
   }
 
-  const employerJobs = jobRows.map((j) => ({
-    id: j.id,
-    company: j.company,
-    employerEmail: j.employer_email,
-    title: j.title,
-    pay: j.pay,
-    hourlyRate: Number(j.hourly_rate || 30),
-    place: j.place,
-    schedule: j.schedule,
-    category: j.category,
-    posted: j.posted_label || 'Hôm nay',
-    description: j.description || '',
-    requirements: j.requirements || '',
-    status: j.status as 'recruiting' | 'paused' | 'filled' | 'completed',
-    moderationStatus: j.moderation_status as 'pending' | 'approved' | 'rejected',
-    openings: Number(j.openings || 1),
-    applicationCount: Number(j.application_count || 0),
-  }));
+  const employerJobs = jobRows.map((j) => {
+    const createdAtIso = toIsoDateString(j.created_at);
+    return {
+      id: j.id,
+      company: j.company,
+      employerEmail: j.employer_email,
+      title: j.title,
+      pay: j.pay,
+      hourlyRate: Number(j.hourly_rate || 30),
+      place: j.place,
+      schedule: j.schedule,
+      category: j.category,
+      posted: formatDynamicPostedLabel(j.created_at, j.posted_label || 'Hôm nay'),
+      createdAt: createdAtIso,
+      description: j.description || '',
+      requirements: j.requirements || '',
+      status: j.status as 'recruiting' | 'paused' | 'filled' | 'completed',
+      moderationStatus: j.moderation_status as 'pending' | 'approved' | 'rejected',
+      openings: Number(j.openings || 1),
+      applicationCount: Number(j.application_count || 0),
+    };
+  });
 
   const approvedJobs = employerJobs
     .filter((j) => j.moderationStatus === 'approved' && j.status === 'recruiting')
@@ -465,6 +515,7 @@ export async function getMarketplaceSessionAction(): Promise<ActionResult<any>> 
       schedule: j.schedule,
       category: j.category,
       posted: j.posted,
+      createdAt: j.createdAt,
       description: j.description,
     }));
 
@@ -480,6 +531,7 @@ export async function getMarketplaceSessionAction(): Promise<ActionResult<any>> 
       schedule: j.schedule,
       category: j.category,
       posted: j.posted,
+      createdAt: j.createdAt,
       description: j.description,
       requirements: j.requirements,
       openings: j.openings,
@@ -498,7 +550,7 @@ export async function getMarketplaceSessionAction(): Promise<ActionResult<any>> 
       title: a.job_title,
       company: a.company_name,
       employerEmail: a.employer_email,
-      date: a.applied_date_label || 'Hôm nay',
+      date: formatDynamicPostedLabel(a.created_at, a.applied_date_label || 'Hôm nay'),
       status: a.status as 'pending' | 'hired' | 'rejected' | 'completed',
       studentEmail: a.student_email,
       studentName: a.student_name,
@@ -528,7 +580,7 @@ export async function getMarketplaceSessionAction(): Promise<ActionResult<any>> 
           title: n.title,
           message: n.message,
           read: Boolean(n.is_read),
-          date: n.date_label || 'Hôm nay',
+          date: formatDynamicPostedLabel(n.created_at, n.date_label || 'Vừa xong'),
           targetPage: n.target_page || 'jobs',
         }))
       : [
@@ -537,7 +589,7 @@ export async function getMarketplaceSessionAction(): Promise<ActionResult<any>> 
             title: 'Chào mừng bạn đến với shiftly',
             message: 'Hãy cập nhật hồ sơ cá nhân để bắt đầu sử dụng đầy đủ tính năng.',
             read: false,
-            date: 'Hôm nay',
+            date: 'Vừa xong',
             targetPage: currentUser.role === 'employer' ? 'employer' : 'jobs',
           },
         ];
@@ -715,7 +767,7 @@ export async function signupAction(input: {
       },
       FALSE,
       ${role === 'employer' ? 'post-job' : 'jobs'},
-      'Hôm nay'
+      'Vừa xong'
     )
   `;
 
@@ -933,7 +985,7 @@ export async function applyToJobAction(input: {
       ${employerEmail}, ${jobTitle}, ${companyName}, ${input.pay || 'Thỏa thuận'},
       ${input.place || 'TP.HCM'}, ${input.schedule || 'Linh hoạt'},
       ${input.introduction || currentUser.bio || ''}, ${hasCV}, ${resolvedCvName},
-      ${hasCV ? resolvedCvUrl || SAMPLE_CV_PDF_DATA_URL : ''}, 'pending', 'Hôm nay'
+      ${hasCV ? resolvedCvUrl || SAMPLE_CV_PDF_DATA_URL : ''}, 'pending', 'Vừa xong'
     )
   `;
 
@@ -1057,7 +1109,7 @@ export async function createReviewAction(input: {
     )
     VALUES (
       ${reviewId}, ${input.applicationId}, ${reviewType}, ${authorName}, ${targetName},
-      ${input.rating}, ${input.comment}, ${moderationStatus}, 'Hôm nay'
+      ${input.rating}, ${input.comment}, ${moderationStatus}, 'Vừa xong'
     )
   `;
 
@@ -1123,7 +1175,7 @@ export async function createJobAction(input: any): Promise<ActionResult<{ id: st
     VALUES (
       ${newJobId}, ${employerId}, ${creatorEmail}, ${companyName}, ${title}, ${payText}, ${hourlyRate},
       ${place}, ${schedule}, ${category}, ${description}, ${requirements}, ${openings},
-      0, 'recruiting', 'pending', 'Hôm nay'
+      0, 'recruiting', 'pending', 'Vừa xong'
     )
   `;
 
