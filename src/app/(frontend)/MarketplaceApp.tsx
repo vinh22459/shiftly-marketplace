@@ -7,6 +7,7 @@ import {
   Bookmark,
   Check,
   ChevronDown,
+  Clock,
   Eye,
   Menu,
   Search,
@@ -152,6 +153,7 @@ type EmployerJobRow = Job & {
 
 const SESSION_STORAGE_KEY = 'shiftly_active_session'
 const PAGE_STORAGE_KEY = 'shiftly_current_page'
+const SEARCH_HISTORY_KEY = 'shiftly_search_history_v1'
 
 type PersistedSession = {
   email: string
@@ -777,11 +779,103 @@ function FindJobs({
   hasCV: boolean
   cvName?: string
 }) {
-  const [query, setQuery] = useState('')
+  const [draftQuery, setDraftQuery] = useState('')
+  const [appliedQuery, setAppliedQuery] = useState('')
+  const [showDropdown, setShowDropdown] = useState(false)
+  const [searchHistory, setSearchHistory] = useState<string[]>([])
   const [category, setCategory] = useState('Tất cả ngành nghề')
   const [location, setLocation] = useState('Tất cả tỉnh / thành phố')
   const [salary, setSalary] = useState('all')
   const [visible, setVisible] = useState(6)
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SEARCH_HISTORY_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        setSearchHistory(parsed.filter((item) => typeof item === 'string').slice(0, 6))
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [])
+
+  const saveHistoryKeyword = (rawKeyword: string) => {
+    const clean = rawKeyword.trim()
+    if (!clean) return
+    setSearchHistory((prev) => {
+      const next = [clean, ...prev.filter((item) => item.toLowerCase() !== clean.toLowerCase())].slice(0, 6)
+      try {
+        window.localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next))
+      } catch {
+        // ignore storage errors
+      }
+      return next
+    })
+  }
+
+  const removeHistoryKeyword = (target: string) => {
+    setSearchHistory((prev) => {
+      const next = prev.filter((item) => item !== target)
+      try {
+        window.localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next))
+      } catch {
+        // ignore storage errors
+      }
+      return next
+    })
+  }
+
+  const clearAllHistory = () => {
+    setSearchHistory([])
+    try {
+      window.localStorage.removeItem(SEARCH_HISTORY_KEY)
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  const executeSearch = (keyword: string) => {
+    const clean = keyword.trim()
+    setDraftQuery(clean)
+    setAppliedQuery(clean)
+    setShowDropdown(false)
+    setVisible(6)
+    if (clean) {
+      saveHistoryKeyword(clean)
+    }
+  }
+
+  const matchingHistory = useMemo(() => {
+    const kw = draftQuery.trim().toLowerCase()
+    if (!kw) return searchHistory
+    return searchHistory.filter((item) => item.toLowerCase().includes(kw))
+  }, [draftQuery, searchHistory])
+
+  const suggestions = useMemo(() => {
+    const kw = draftQuery.trim().toLowerCase()
+    if (!kw) return []
+
+    const items: Array<{ label: string; sub: string; keyword: string }> = []
+    const seen = new Set<string>(searchHistory.map((h) => h.toLowerCase()))
+
+    const addSuggestion = (label: string, sub: string, keyword: string) => {
+      const key = label.toLowerCase()
+      if (!seen.has(key) && (key.includes(kw) || keyword.toLowerCase().includes(kw))) {
+        seen.add(key)
+        items.push({ label, sub, keyword })
+      }
+    }
+
+    for (const job of jobs) {
+      addSuggestion(job.title, `${job.company} · ${job.pay}`, job.title)
+      addSuggestion(job.company, `Doanh nghiệp · ${job.category}`, job.company)
+      addSuggestion(job.category, 'Ngành nghề', job.category)
+    }
+
+    return items.slice(0, 6)
+  }, [draftQuery, jobs, searchHistory])
 
   const matchesProvince = (place: string, selectedProvince: string) => {
     if (selectedProvince === 'Tất cả tỉnh / thành phố') return true
@@ -806,7 +900,7 @@ function FindJobs({
       jobs.filter((job) => {
         const text = `${job.title} ${job.company} ${job.category} ${job.place}`
           .toLowerCase()
-          .includes(query.trim().toLowerCase())
+          .includes(appliedQuery.trim().toLowerCase())
         const matchedCategory = category === 'Tất cả ngành nghề' || job.category === category
         const area = matchesProvince(job.place, location)
         const pay =
@@ -816,8 +910,11 @@ function FindJobs({
           (salary === 'over-45' && job.hourlyRate > 45)
         return text && matchedCategory && area && pay
       }),
-    [jobs, query, category, location, salary],
+    [jobs, appliedQuery, category, location, salary],
   )
+
+  const hasDropdownContent =
+    matchingHistory.length > 0 || suggestions.length > 0 || draftQuery.trim().length > 0
 
   return (
     <main>
@@ -826,17 +923,248 @@ function FindJobs({
         title="Tìm công việc phù hợp với lịch học."
         copy="Khám phá việc làm bán thời gian đa ngành nghề trên khắp 63 tỉnh thành Việt Nam."
       />
-      <section className="search-bar">
-        <label>
+      <section className="search-bar" style={{ position: 'relative' }}>
+        <label style={{ position: 'relative' }}>
           <span>Vị trí hoặc từ khóa</span>
-          <input
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value)
-              setVisible(6)
-            }}
-            placeholder="Pha chế, Gia sư, Bán hàng, Marketing, Sự kiện..."
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              value={draftQuery}
+              onFocus={() => setShowDropdown(true)}
+              onBlur={() => window.setTimeout(() => setShowDropdown(false), 180)}
+              onChange={(e) => {
+                const val = e.target.value
+                setDraftQuery(val)
+                setShowDropdown(true)
+                if (!val.trim()) {
+                  setAppliedQuery('')
+                  setVisible(6)
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  executeSearch(draftQuery)
+                }
+              }}
+              placeholder="Pha chế, Gia sư, Bán hàng, Marketing, Sự kiện..."
+            />
+            {draftQuery && (
+              <button
+                type="button"
+                aria-label="Xóa từ khóa đang nhập"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  setDraftQuery('')
+                  setAppliedQuery('')
+                  setShowDropdown(true)
+                  setVisible(6)
+                }}
+                style={{
+                  border: 0,
+                  background: '#eef2ef',
+                  color: '#5b6962',
+                  borderRadius: '999px',
+                  width: '22px',
+                  height: '22px',
+                  fontSize: '12px',
+                  display: 'grid',
+                  placeItems: 'center',
+                  flexShrink: 0,
+                  cursor: 'pointer',
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+
+          {showDropdown && hasDropdownContent && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 12px)',
+                left: '-10px',
+                right: '-10px',
+                zIndex: 40,
+                backgroundColor: '#ffffff',
+                borderRadius: '10px',
+                border: '1px solid #dfe5e1',
+                boxShadow: '0 14px 32px rgba(17, 66, 50, 0.14)',
+                overflow: 'hidden',
+              }}
+            >
+              {matchingHistory.length > 0 && (
+                <div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 14px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      letterSpacing: '0.04em',
+                      color: '#6b7972',
+                      backgroundColor: '#f6f8f6',
+                      borderBottom: '1px solid #e7ebe8',
+                    }}
+                  >
+                    <span>LỊCH SỬ TÌM KIẾM GẦN ĐÂY</span>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        clearAllHistory()
+                      }}
+                      style={{
+                        border: 0,
+                        background: 'transparent',
+                        color: '#185f43',
+                        fontSize: '11.5px',
+                        fontWeight: 600,
+                        padding: 0,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Xóa lịch sử
+                    </button>
+                  </div>
+
+                  {matchingHistory.map((item) => (
+                    <div
+                      key={item}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        borderBottom: '1px solid #eef1ef',
+                        backgroundColor: '#ffffff',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          executeSearch(item)
+                        }}
+                        style={{
+                          flex: 1,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          padding: '10px 14px',
+                          border: 0,
+                          background: 'transparent',
+                          textAlign: 'left',
+                          color: '#173a2e',
+                          fontSize: '13.5px',
+                          fontWeight: 500,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Clock size={14} color="#6b7972" />
+                        <span>{item}</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Xóa ${item}`}
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          removeHistoryKeyword(item)
+                        }}
+                        style={{
+                          border: 0,
+                          background: 'transparent',
+                          color: '#8c9691',
+                          padding: '8px 14px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {draftQuery.trim().length > 0 && (
+                <div>
+                  <div
+                    style={{
+                      padding: '8px 14px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      letterSpacing: '0.04em',
+                      color: '#6b7972',
+                      backgroundColor: '#f6f8f6',
+                      borderBottom: '1px solid #e7ebe8',
+                    }}
+                  >
+                    ĐỀ XUẤT TÌM KIẾM LIÊN QUAN
+                  </div>
+
+                  {suggestions.length > 0 ? (
+                    suggestions.map((item, idx) => (
+                      <button
+                        key={`${item.label}-${idx}`}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          executeSearch(item.keyword)
+                        }}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '12px',
+                          padding: '10px 14px',
+                          border: 0,
+                          borderBottom: idx < suggestions.length - 1 ? '1px solid #eef1ef' : 'none',
+                          backgroundColor: '#ffffff',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#173a2e' }}>
+                            {item.label}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#6b7972', marginTop: '2px' }}>
+                            {item.sub}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: '#185f43' }}>
+                          Tìm kiếm ↵
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        executeSearch(draftQuery)
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '11px 14px',
+                        border: 0,
+                        backgroundColor: '#ffffff',
+                        textAlign: 'left',
+                        fontSize: '13px',
+                        color: '#5b6962',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Nhấn <strong>Tìm việc</strong> để tìm &ldquo;{draftQuery.trim()}&rdquo;
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </label>
         <label className="location-field">
           <span>Tỉnh / Thành phố</span>
@@ -854,12 +1182,7 @@ function FindJobs({
             ))}
           </select>
         </label>
-        <button
-          type="button"
-          onClick={() => {
-            setVisible(filtered.length || 6)
-          }}
-        >
+        <button type="button" onClick={() => executeSearch(draftQuery)}>
           <Search size={15} /> Tìm việc
         </button>
       </section>
@@ -881,6 +1204,9 @@ function FindJobs({
             setVisible(6)
           }}
           onResetAll={() => {
+            setDraftQuery('')
+            setAppliedQuery('')
+            setShowDropdown(false)
             setCategory('Tất cả ngành nghề')
             setLocation('Tất cả tỉnh / thành phố')
             setSalary('all')
@@ -890,8 +1216,10 @@ function FindJobs({
         <div className="job-results">
           <div className="results-heading">
             <h2>
-              {filtered.length} việc làm
-              {location !== 'Tất cả tỉnh / thành phố' ? ` tại ${location}` : ' trên toàn quốc'}
+              {appliedQuery
+                ? `${filtered.length} kết quả cho "${appliedQuery}"`
+                : `${filtered.length} việc làm`}
+              {location !== 'Tất cả tỉnh / thành phố' ? ` tại ${location}` : !appliedQuery ? ' trên toàn quốc' : ''}
             </h2>
             <span>
               Sắp xếp: <strong>Đề xuất</strong> <ChevronDown size={12} />
