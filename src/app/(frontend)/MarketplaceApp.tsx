@@ -788,6 +788,8 @@ function FindJobs({
   const [salary, setSalary] = useState('all')
   const [visible, setVisible] = useState(6)
 
+  const searchBoxRef = useRef<HTMLDivElement | null>(null)
+
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(SEARCH_HISTORY_KEY)
@@ -798,6 +800,20 @@ function FindJobs({
       }
     } catch {
       // ignore storage errors
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleOutsidePress = (event: MouseEvent | TouchEvent) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(event.target as Node)) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutsidePress)
+    document.addEventListener('touchstart', handleOutsidePress)
+    return () => {
+      document.removeEventListener('mousedown', handleOutsidePress)
+      document.removeEventListener('touchstart', handleOutsidePress)
     }
   }, [])
 
@@ -924,59 +940,65 @@ function FindJobs({
         copy="Khám phá việc làm bán thời gian đa ngành nghề trên khắp 63 tỉnh thành Việt Nam."
       />
       <section className="search-bar" style={{ position: 'relative' }}>
-        <label style={{ position: 'relative' }}>
-          <span>Vị trí hoặc từ khóa</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <input
-              value={draftQuery}
-              onFocus={() => setShowDropdown(true)}
-              onBlur={() => window.setTimeout(() => setShowDropdown(false), 180)}
-              onChange={(e) => {
-                const val = e.target.value
-                setDraftQuery(val)
-                setShowDropdown(true)
-                if (!val.trim()) {
-                  setAppliedQuery('')
-                  setVisible(6)
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  executeSearch(draftQuery)
-                }
-              }}
-              placeholder="Pha chế, Gia sư, Bán hàng, Marketing, Sự kiện..."
-            />
-            {draftQuery && (
-              <button
-                type="button"
-                aria-label="Xóa từ khóa đang nhập"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  setDraftQuery('')
-                  setAppliedQuery('')
+        <div
+          ref={searchBoxRef}
+          style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}
+        >
+          <label style={{ width: '100%' }}>
+            <span>Vị trí hoặc từ khóa</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                value={draftQuery}
+                onFocus={() => setShowDropdown(true)}
+                onClick={() => setShowDropdown(true)}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setDraftQuery(val)
                   setShowDropdown(true)
-                  setVisible(6)
+                  if (!val.trim()) {
+                    setAppliedQuery('')
+                    setVisible(6)
+                  }
                 }}
-                style={{
-                  border: 0,
-                  background: '#eef2ef',
-                  color: '#5b6962',
-                  borderRadius: '999px',
-                  width: '22px',
-                  height: '22px',
-                  fontSize: '12px',
-                  display: 'grid',
-                  placeItems: 'center',
-                  flexShrink: 0,
-                  cursor: 'pointer',
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setShowDropdown(false)
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault()
+                    executeSearch(draftQuery)
+                  }
                 }}
-              >
-                ×
-              </button>
-            )}
-          </div>
+                placeholder="Pha chế, Gia sư, Bán hàng, Marketing, Sự kiện..."
+              />
+              {draftQuery && (
+                <button
+                  type="button"
+                  aria-label="Xóa từ khóa đang nhập"
+                  onClick={() => {
+                    setDraftQuery('')
+                    setAppliedQuery('')
+                    setShowDropdown(true)
+                    setVisible(6)
+                  }}
+                  style={{
+                    border: 0,
+                    background: '#eef2ef',
+                    color: '#5b6962',
+                    borderRadius: '999px',
+                    width: '22px',
+                    height: '22px',
+                    fontSize: '12px',
+                    display: 'grid',
+                    placeItems: 'center',
+                    flexShrink: 0,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </label>
 
           {showDropdown && hasDropdownContent && (
             <div
@@ -1012,10 +1034,7 @@ function FindJobs({
                     <span>LỊCH SỬ TÌM KIẾM GẦN ĐÂY</span>
                     <button
                       type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        clearAllHistory()
-                      }}
+                      onClick={clearAllHistory}
                       style={{
                         border: 0,
                         background: 'transparent',
@@ -1043,10 +1062,7 @@ function FindJobs({
                     >
                       <button
                         type="button"
-                        onMouseDown={(e) => {
-                          e.preventDefault()
-                          executeSearch(item)
-                        }}
+                        onClick={() => executeSearch(item)}
                         style={{
                           flex: 1,
                           display: 'flex',
@@ -1068,10 +1084,7 @@ function FindJobs({
                       <button
                         type="button"
                         aria-label={`Xóa ${item}`}
-                        onMouseDown={(e) => {
-                          e.preventDefault()
-                          removeHistoryKeyword(item)
-                        }}
+                        onClick={() => removeHistoryKeyword(item)}
                         style={{
                           border: 0,
                           background: 'transparent',
@@ -1109,10 +1122,7 @@ function FindJobs({
                       <button
                         key={`${item.label}-${idx}`}
                         type="button"
-                        onMouseDown={(e) => {
-                          e.preventDefault()
-                          executeSearch(item.keyword)
-                        }}
+                        onClick={() => executeSearch(item.keyword)}
                         style={{
                           width: '100%',
                           display: 'flex',
@@ -1143,10 +1153,7 @@ function FindJobs({
                   ) : (
                     <button
                       type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        executeSearch(draftQuery)
-                      }}
+                      onClick={() => executeSearch(draftQuery)}
                       style={{
                         width: '100%',
                         padding: '11px 14px',
@@ -1165,7 +1172,7 @@ function FindJobs({
               )}
             </div>
           )}
-        </label>
+        </div>
         <label className="location-field">
           <span>Tỉnh / Thành phố</span>
           <select
