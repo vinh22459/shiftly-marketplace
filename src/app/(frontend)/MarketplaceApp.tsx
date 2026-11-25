@@ -6,7 +6,6 @@ import {
   Bell,
   Bookmark,
   Check,
-  ChevronDown,
   Clock,
   Eye,
   Menu,
@@ -787,6 +786,7 @@ function FindJobs({
   const [searchHistory, setSearchHistory] = useState<string[]>([])
   const [category, setCategory] = useState('Tất cả ngành nghề')
   const [salary, setSalary] = useState('all')
+  const [sortOrder, setSortOrder] = useState<'recommended' | 'newest' | 'oldest'>('recommended')
   const [visible, setVisible] = useState(6)
 
   const searchBoxRef = useRef<HTMLDivElement | null>(null)
@@ -932,23 +932,61 @@ function FindJobs({
     )
   }
 
-  const filtered = useMemo(
-    () =>
-      jobs.filter((job) => {
-        const text = `${job.title} ${job.company} ${job.category} ${job.place}`
-          .toLowerCase()
-          .includes(appliedQuery.trim().toLowerCase())
-        const matchedCategory = category === 'Tất cả ngành nghề' || job.category === category
-        const area = matchesProvince(job.place, appliedLocation)
-        const pay =
-          salary === 'all' ||
-          (salary === 'under-30' && job.hourlyRate < 30) ||
-          (salary === '30-45' && job.hourlyRate >= 30 && job.hourlyRate <= 45) ||
-          (salary === 'over-45' && job.hourlyRate > 45)
-        return text && matchedCategory && area && pay
-      }),
-    [jobs, appliedQuery, category, appliedLocation, salary],
-  )
+  const getPostedAgeMinutes = (posted: string) => {
+    const raw = (posted || '').trim().toLowerCase()
+    if (!raw || raw.includes('vừa') || raw.includes('mới')) return 0
+    if (raw.includes('hôm nay')) return 60
+    if (raw.includes('hôm qua')) return 24 * 60
+
+    const numMatch = raw.match(/(\d+)/)
+    const num = numMatch ? Number(numMatch[1]) : 1
+
+    if (raw.includes('phút')) return num
+    if (raw.includes('giờ')) return num * 60
+    if (raw.includes('ngày')) return num * 24 * 60
+    if (raw.includes('tuần')) return num * 7 * 24 * 60
+    if (raw.includes('tháng')) return num * 30 * 24 * 60
+    if (raw.includes('năm')) return num * 365 * 24 * 60
+
+    const dateMatch = raw.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/)
+    if (dateMatch) {
+      const day = Number(dateMatch[1])
+      const month = Number(dateMatch[2]) - 1
+      const year = dateMatch[3]
+        ? Number(dateMatch[3].length === 2 ? `20${dateMatch[3]}` : dateMatch[3])
+        : new Date().getFullYear()
+      const parsedDate = new Date(year, month, day).getTime()
+      if (!Number.isNaN(parsedDate)) {
+        return Math.max(0, Math.floor((Date.now() - parsedDate) / 60000))
+      }
+    }
+
+    return 999999
+  }
+
+  const filtered = useMemo(() => {
+    const matched = jobs.filter((job) => {
+      const text = `${job.title} ${job.company} ${job.category} ${job.place}`
+        .toLowerCase()
+        .includes(appliedQuery.trim().toLowerCase())
+      const matchedCategory = category === 'Tất cả ngành nghề' || job.category === category
+      const area = matchesProvince(job.place, appliedLocation)
+      const pay =
+        salary === 'all' ||
+        (salary === 'under-30' && job.hourlyRate < 30) ||
+        (salary === '30-45' && job.hourlyRate >= 30 && job.hourlyRate <= 45) ||
+        (salary === 'over-45' && job.hourlyRate > 45)
+      return text && matchedCategory && area && pay
+    })
+
+    if (sortOrder === 'recommended') return matched
+
+    return [...matched].sort((a, b) => {
+      const ageA = getPostedAgeMinutes(a.posted)
+      const ageB = getPostedAgeMinutes(b.posted)
+      return sortOrder === 'newest' ? ageA - ageB : ageB - ageA
+    })
+  }, [jobs, appliedQuery, category, appliedLocation, salary, sortOrder])
 
   const hasDropdownContent =
     matchingHistory.length > 0 || suggestions.length > 0 || draftQuery.trim().length > 0
@@ -1239,6 +1277,7 @@ function FindJobs({
             setShowDropdown(false)
             setCategory('Tất cả ngành nghề')
             setSalary('all')
+            setSortOrder('recommended')
             setVisible(6)
           }}
         />
@@ -1254,9 +1293,39 @@ function FindJobs({
                   ? ' trên toàn quốc'
                   : ''}
             </h2>
-            <span>
-              Sắp xếp: <strong>Đề xuất</strong> <ChevronDown size={12} />
-            </span>
+            <label
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '13.5px',
+                color: '#4c5953',
+                cursor: 'pointer',
+              }}
+            >
+              <span>Sắp xếp:</span>
+              <select
+                value={sortOrder}
+                onChange={(e) => {
+                  setSortOrder(e.target.value as 'recommended' | 'newest' | 'oldest')
+                  setVisible(6)
+                }}
+                style={{
+                  border: '1px solid #d5ddd8',
+                  borderRadius: '8px',
+                  padding: '5px 10px',
+                  fontSize: '13.5px',
+                  fontWeight: 700,
+                  color: '#114232',
+                  backgroundColor: '#ffffff',
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="recommended">Đề xuất</option>
+                <option value="newest">Mới nhất</option>
+                <option value="oldest">Lâu hơn</option>
+              </select>
+            </label>
           </div>
           <div className="job-list">
             {filtered.slice(0, visible).map((job) => {
