@@ -156,6 +156,7 @@ const SESSION_STORAGE_KEY = 'shiftly_active_session'
 const PAGE_STORAGE_KEY = 'shiftly_current_page'
 const SEARCH_HISTORY_KEY = 'shiftly_search_history_v1'
 const MAX_ATTACHMENT_BYTES = 1.5 * 1024 * 1024
+const JOBS_PER_PAGE = 6
 
 type PersistedSession = {
   email: string
@@ -817,8 +818,8 @@ function Hero({
 }
 
 function Filters({
-  category,
-  setCategory,
+  selectedCategories,
+  setSelectedCategories,
   minPay,
   setMinPay,
   maxPay,
@@ -835,8 +836,8 @@ function Filters({
   setSelectedShifts,
   onResetAll,
 }: {
-  category: string
-  setCategory: (v: string) => void
+  selectedCategories: string[]
+  setSelectedCategories: React.Dispatch<React.SetStateAction<string[]>>
   minPay: string
   setMinPay: (v: string) => void
   maxPay: string
@@ -853,6 +854,16 @@ function Filters({
   setSelectedShifts: React.Dispatch<React.SetStateAction<string[]>>
   onResetAll: () => void
 }) {
+  const toggleCategory = (item: string) => {
+    if (item === 'Tất cả ngành nghề') {
+      setSelectedCategories([])
+      return
+    }
+    setSelectedCategories((prev) =>
+      prev.includes(item) ? prev.filter((c) => c !== item) : [...prev, item],
+    )
+  }
+
   const toggleDay = (day: string) => {
     setSelectedDays((prev) =>
       prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
@@ -891,13 +902,16 @@ function Filters({
       <div className="filter-section">
         <h3>Ngành nghề</h3>
         {jobCategories.map((item) => {
-          const checked = category === item
+          const checked =
+            item === 'Tất cả ngành nghề'
+              ? selectedCategories.length === 0
+              : selectedCategories.includes(item)
           return (
             <label key={item}>
               <input
                 type="checkbox"
                 checked={checked}
-                onChange={() => setCategory(item)}
+                onChange={() => toggleCategory(item)}
               />
               <span className="fake-check">{checked && <Check size={10} />}</span>
               {item}
@@ -1160,7 +1174,7 @@ function FindJobs({
   const [appliedLocation, setAppliedLocation] = useState('Tất cả tỉnh / thành phố')
   const [showDropdown, setShowDropdown] = useState(false)
   const [searchHistory, setSearchHistory] = useState<string[]>([])
-  const [category, setCategory] = useState('Tất cả ngành nghề')
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([])
   const [minPay, setMinPay] = useState('')
   const [maxPay, setMaxPay] = useState('')
   const [payUnit, setPayUnit] = useState<'all' | PayUnit>('all')
@@ -1169,7 +1183,7 @@ function FindJobs({
   const [endTime, setEndTime] = useState('')
   const [selectedShifts, setSelectedShifts] = useState<string[]>([])
   const [sortOrder, setSortOrder] = useState<'recommended' | 'newest' | 'oldest'>('recommended')
-  const [visible, setVisible] = useState(6)
+  const [currentPage, setCurrentPage] = useState(1)
 
   const searchBoxRef = useRef<HTMLDivElement | null>(null)
 
@@ -1242,7 +1256,7 @@ function FindJobs({
     setDraftLocation(nextLocation)
     setAppliedLocation(nextLocation)
     setShowDropdown(false)
-    setVisible(6)
+    setCurrentPage(1)
     if (clean) {
       saveHistoryKeyword(clean)
     }
@@ -1363,7 +1377,8 @@ function FindJobs({
       const text = `${job.title} ${job.company} ${job.category} ${job.place}`
         .toLowerCase()
         .includes(appliedQuery.trim().toLowerCase())
-      const matchedCategory = category === 'Tất cả ngành nghề' || job.category === category
+      const matchedCategory =
+        selectedCategories.length === 0 || selectedCategories.includes(job.category)
       const area = matchesProvince(job.place, appliedLocation)
 
       const jobPay = parseJobPayInfo(job)
@@ -1426,7 +1441,7 @@ function FindJobs({
   }, [
     jobs,
     appliedQuery,
-    category,
+    selectedCategories,
     appliedLocation,
     minPay,
     maxPay,
@@ -1437,6 +1452,17 @@ function FindJobs({
     selectedShifts,
     sortOrder,
   ])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / JOBS_PER_PAGE))
+  const safeCurrentPage = Math.min(currentPage, totalPages)
+  const startIndex = (safeCurrentPage - 1) * JOBS_PER_PAGE
+  const paginatedJobs = filtered.slice(startIndex, startIndex + JOBS_PER_PAGE)
+
+  const handlePageChange = (nextPage: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, nextPage))
+    setCurrentPage(clamped)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   const hasDropdownContent =
     matchingHistory.length > 0 || suggestions.length > 0 || draftQuery.trim().length > 0
@@ -1472,7 +1498,7 @@ function FindJobs({
                   setShowDropdown(true)
                   if (!val.trim()) {
                     setAppliedQuery('')
-                    setVisible(6)
+                    setCurrentPage(1)
                   }
                 }}
                 onKeyDown={(e) => {
@@ -1493,7 +1519,7 @@ function FindJobs({
                     setDraftQuery('')
                     setAppliedQuery('')
                     setShowDropdown(true)
-                    setVisible(6)
+                    setCurrentPage(1)
                   }}
                   style={{
                     border: 0,
@@ -1709,45 +1735,45 @@ function FindJobs({
       </section>
       <section className="market-grid">
         <Filters
-          category={category}
-          setCategory={(v) => {
-            setCategory(v)
-            setVisible(6)
+          selectedCategories={selectedCategories}
+          setSelectedCategories={(updater) => {
+            setSelectedCategories(updater)
+            setCurrentPage(1)
           }}
           minPay={minPay}
           setMinPay={(v) => {
             setMinPay(v)
-            setVisible(6)
+            setCurrentPage(1)
           }}
           maxPay={maxPay}
           setMaxPay={(v) => {
             setMaxPay(v)
-            setVisible(6)
+            setCurrentPage(1)
           }}
           payUnit={payUnit}
           setPayUnit={(v) => {
             setPayUnit(v)
-            setVisible(6)
+            setCurrentPage(1)
           }}
           selectedDays={selectedDays}
           setSelectedDays={(updater) => {
             setSelectedDays(updater)
-            setVisible(6)
+            setCurrentPage(1)
           }}
           startTime={startTime}
           setStartTime={(v) => {
             setStartTime(v)
-            setVisible(6)
+            setCurrentPage(1)
           }}
           endTime={endTime}
           setEndTime={(v) => {
             setEndTime(v)
-            setVisible(6)
+            setCurrentPage(1)
           }}
           selectedShifts={selectedShifts}
           setSelectedShifts={(updater) => {
             setSelectedShifts(updater)
-            setVisible(6)
+            setCurrentPage(1)
           }}
           onResetAll={() => {
             setDraftQuery('')
@@ -1755,7 +1781,7 @@ function FindJobs({
             setDraftLocation('Tất cả tỉnh / thành phố')
             setAppliedLocation('Tất cả tỉnh / thành phố')
             setShowDropdown(false)
-            setCategory('Tất cả ngành nghề')
+            setSelectedCategories([])
             setMinPay('')
             setMaxPay('')
             setPayUnit('all')
@@ -1764,7 +1790,7 @@ function FindJobs({
             setEndTime('')
             setSelectedShifts([])
             setSortOrder('recommended')
-            setVisible(6)
+            setCurrentPage(1)
           }}
         />
         <div className="job-results">
@@ -1794,7 +1820,7 @@ function FindJobs({
                 value={sortOrder}
                 onChange={(e) => {
                   setSortOrder(e.target.value as 'recommended' | 'newest' | 'oldest')
-                  setVisible(6)
+                  setCurrentPage(1)
                 }}
                 style={{
                   border: '1px solid #d5ddd8',
@@ -1814,7 +1840,7 @@ function FindJobs({
             </label>
           </div>
           <div className="job-list">
-            {filtered.slice(0, visible).map((job) => {
+            {paginatedJobs.map((job) => {
               const isSaved = savedJobs.some((saved) => saved.jobId === job.id)
               return (
                 <article className="job-card" key={job.id}>
@@ -1877,29 +1903,96 @@ function FindJobs({
               Không tìm thấy công việc phù hợp với bộ lọc hiện tại.
             </div>
           )}
-          <div className="load-row">
-            <span>
-              Đang hiển thị {Math.min(visible, filtered.length)} trong {filtered.length} cơ hội
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              {visible > 6 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setVisible(6)
-                    window.scrollTo({ top: 0, behavior: 'smooth' })
+          {filtered.length > 0 && (
+            <div
+              className="load-row"
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+              }}
+            >
+              <span>
+                Hiển thị {startIndex + 1}–{Math.min(startIndex + JOBS_PER_PAGE, filtered.length)}{' '}
+                trong {filtered.length} cơ hội (Trang {safeCurrentPage}/{totalPages})
+              </span>
+
+              {totalPages > 1 && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    flexWrap: 'wrap',
                   }}
                 >
-                  Thu gọn
-                </button>
-              )}
-              {visible < filtered.length && (
-                <button type="button" onClick={() => setVisible(filtered.length)}>
-                  Xem thêm việc làm
-                </button>
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage === 1}
+                    onClick={() => handlePageChange(safeCurrentPage - 1)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #d5ddd8',
+                      backgroundColor: safeCurrentPage === 1 ? '#f3f5f4' : '#ffffff',
+                      color: safeCurrentPage === 1 ? '#9aa59f' : '#114232',
+                      fontWeight: 600,
+                      fontSize: '13px',
+                      cursor: safeCurrentPage === 1 ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    ← Trước
+                  </button>
+
+                  {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((pageNum) => {
+                    const isActive = pageNum === safeCurrentPage
+                    return (
+                      <button
+                        key={pageNum}
+                        type="button"
+                        aria-current={isActive ? 'page' : undefined}
+                        onClick={() => handlePageChange(pageNum)}
+                        style={{
+                          minWidth: '34px',
+                          height: '34px',
+                          padding: '0 8px',
+                          borderRadius: '8px',
+                          border: isActive ? '1px solid #114232' : '1px solid #d5ddd8',
+                          backgroundColor: isActive ? '#114232' : '#ffffff',
+                          color: isActive ? '#ffffff' : '#114232',
+                          fontWeight: 700,
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {pageNum}
+                      </button>
+                    )
+                  })}
+
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage === totalPages}
+                    onClick={() => handlePageChange(safeCurrentPage + 1)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #d5ddd8',
+                      backgroundColor: safeCurrentPage === totalPages ? '#f3f5f4' : '#ffffff',
+                      color: safeCurrentPage === totalPages ? '#9aa59f' : '#114232',
+                      fontWeight: 600,
+                      fontSize: '13px',
+                      cursor: safeCurrentPage === totalPages ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    Sau →
+                  </button>
+                </div>
               )}
             </div>
-          </div>
+          )}
         </div>
         <aside className="right-rail">
           <div className="profile-promo">
