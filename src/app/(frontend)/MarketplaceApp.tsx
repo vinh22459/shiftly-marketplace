@@ -73,6 +73,7 @@ type Job = {
   schedule: string
   category: string
   posted: string
+  createdAt?: string
   description: string
 }
 
@@ -94,6 +95,7 @@ type AdminJobRow = {
   schedule?: string
   category?: string
   posted?: string
+  createdAt?: string
   description?: string
   requirements?: string
   openings?: number
@@ -153,6 +155,7 @@ type EmployerJobRow = Job & {
 const SESSION_STORAGE_KEY = 'shiftly_active_session'
 const PAGE_STORAGE_KEY = 'shiftly_current_page'
 const SEARCH_HISTORY_KEY = 'shiftly_search_history_v1'
+const MAX_ATTACHMENT_BYTES = 1.5 * 1024 * 1024
 
 type PersistedSession = {
   email: string
@@ -225,6 +228,79 @@ const jobCategories = [
   'Media / Quay dựng video',
 ]
 
+const PAY_UNITS = ['K / giờ', 'K / ca', 'Triệu / tháng'] as const
+type PayUnit = (typeof PAY_UNITS)[number]
+
+const WORK_DAYS = [
+  { value: 'T2', label: 'Thứ 2' },
+  { value: 'T3', label: 'Thứ 3' },
+  { value: 'T4', label: 'Thứ 4' },
+  { value: 'T5', label: 'Thứ 5' },
+  { value: 'T6', label: 'Thứ 6' },
+  { value: 'T7', label: 'Thứ 7' },
+  { value: 'CN', label: 'Chủ nhật' },
+] as const
+
+const WORK_SHIFTS = [
+  'Ca sáng (06:00–12:00)',
+  'Ca chiều (12:00–18:00)',
+  'Ca tối (18:00–22:00)',
+  'Ca đêm (22:00–06:00)',
+  'Xoay ca linh hoạt',
+] as const
+
+function parseJobPayInfo(job: Job): { min: number; max: number; unit: PayUnit } {
+  const raw = (job.pay || '').trim()
+  let unit: PayUnit = 'K / giờ'
+  if (/triệu\s*\/\s*tháng/i.test(raw)) unit = 'Triệu / tháng'
+  else if (/\/\s*ca/i.test(raw)) unit = 'K / ca'
+
+  const nums = raw.match(/\d+(?:[.,]\d+)?/g)?.map((n) => Number(n.replace(',', '.'))) ?? []
+  if (nums.length >= 2) {
+    return { min: Math.min(nums[0], nums[1]), max: Math.max(nums[0], nums[1]), unit }
+  }
+  if (nums.length === 1) {
+    return { min: nums[0], max: nums[0], unit }
+  }
+  return { min: job.hourlyRate || 0, max: job.hourlyRate || 0, unit }
+}
+
+function parseTimeToMinutes(timeStr: string): number | null {
+  const match = timeStr.match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return null
+  return Number(match[1]) * 60 + Number(match[2])
+}
+
+function extractDaysFromSchedule(schedule: string): string[] {
+  const s = schedule.toLowerCase()
+  if (s.includes('t2–cn') || s.includes('t2-cn') || s.includes('cả tuần')) {
+    return ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
+  }
+  if (s.includes('t2–t6') || s.includes('t2-t6')) {
+    return ['T2', 'T3', 'T4', 'T5', 'T6']
+  }
+  if (s.includes('t2–t7') || s.includes('t2-t7')) {
+    return ['T2', 'T3', 'T4', 'T5', 'T6', 'T7']
+  }
+  if (s.includes('cuối tuần')) {
+    return ['T7', 'CN']
+  }
+  const found: string[] = []
+  const map: [RegExp, string][] = [
+    [/\bt2\b|thứ\s*2/, 'T2'],
+    [/\bt3\b|thứ\s*3/, 'T3'],
+    [/\bt4\b|thứ\s*4/, 'T4'],
+    [/\bt5\b|thứ\s*5/, 'T5'],
+    [/\bt6\b|thứ\s*6/, 'T6'],
+    [/\bt7\b|thứ\s*7/, 'T7'],
+    [/\bcn\b|chủ\s*nhật/, 'CN'],
+  ]
+  for (const [regex, code] of map) {
+    if (regex.test(s)) found.push(code)
+  }
+  return found
+}
+
 const PROVINCES_63 = [
   'An Giang',
   'Bà Rịa - Vũng Tàu',
@@ -292,13 +368,6 @@ const PROVINCES_63 = [
 ]
 
 const locations = ['Tất cả tỉnh / thành phố', ...PROVINCES_63]
-
-const salaryRanges = [
-  ['all', 'Tất cả mức lương'],
-  ['under-30', 'Dưới 30K / giờ'],
-  ['30-45', '30–45K / giờ'],
-  ['over-45', 'Trên 45K / giờ'],
-]
 
 function openAttachmentInBrowser(fileUrl?: string, fallbackName = 'HoSo_UngVien') {
   if (!fileUrl) return
@@ -699,24 +768,63 @@ function Filters({
   setCategory,
   location,
   setLocation,
-  salary,
-  setSalary,
+  minPay,
+  setMinPay,
+  maxPay,
+  setMaxPay,
+  payUnit,
+  setPayUnit,
+  selectedDays,
+  setSelectedDays,
+  startTime,
+  setStartTime,
+  endTime,
+  setEndTime,
+  selectedShifts,
+  setSelectedShifts,
   onResetAll,
 }: {
   category: string
   setCategory: (v: string) => void
   location: string
   setLocation: (v: string) => void
-  salary: string
-  setSalary: (v: string) => void
+  minPay: string
+  setMinPay: (v: string) => void
+  maxPay: string
+  setMaxPay: (v: string) => void
+  payUnit: 'all' | PayUnit
+  setPayUnit: (v: 'all' | PayUnit) => void
+  selectedDays: string[]
+  setSelectedDays: React.Dispatch<React.SetStateAction<string[]>>
+  startTime: string
+  setStartTime: (v: string) => void
+  endTime: string
+  setEndTime: (v: string) => void
+  selectedShifts: string[]
+  setSelectedShifts: React.Dispatch<React.SetStateAction<string[]>>
   onResetAll: () => void
 }) {
+  const toggleDay = (day: string) => {
+    setSelectedDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
+    )
+  }
+
+  const toggleShift = (shift: string) => {
+    setSelectedShifts((prev) =>
+      prev.includes(shift) ? prev.filter((s) => s !== shift) : [...prev, shift],
+    )
+  }
+
   return (
     <aside className="filters">
       <div className="filter-heading">
         <h2>Lọc việc làm</h2>
-        <button onClick={onResetAll}>Đặt lại</button>
+        <button type="button" onClick={onResetAll}>
+          Đặt lại
+        </button>
       </div>
+
       <div className="filter-section">
         <h3>Ngành nghề</h3>
         {jobCategories.map((item) => (
@@ -727,6 +835,7 @@ function Filters({
           </label>
         ))}
       </div>
+
       <div className="filter-section bordered">
         <h3>Tỉnh / Thành phố (63 tỉnh thành)</h3>
         <select
@@ -741,20 +850,177 @@ function Filters({
           ))}
         </select>
       </div>
+
       <div className="filter-section bordered">
-        <h3>Mức lương theo giờ</h3>
+        <h3>Mức lương mong muốn</h3>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '8px',
+            marginBottom: '8px',
+          }}
+        >
+          <div>
+            <small style={{ display: 'block', color: '#5c6660', marginBottom: '4px' }}>
+              Lương tối thiểu
+            </small>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              value={minPay}
+              onChange={(e) => setMinPay(e.target.value)}
+              placeholder="VD: 25"
+              style={{
+                width: '100%',
+                padding: '7px 9px',
+                border: '1px solid #d5ddd8',
+                borderRadius: '8px',
+                fontSize: '13px',
+              }}
+            />
+          </div>
+          <div>
+            <small style={{ display: 'block', color: '#5c6660', marginBottom: '4px' }}>
+              Lương tối đa
+            </small>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              value={maxPay}
+              onChange={(e) => setMaxPay(e.target.value)}
+              placeholder="VD: 45"
+              style={{
+                width: '100%',
+                padding: '7px 9px',
+                border: '1px solid #d5ddd8',
+                borderRadius: '8px',
+                fontSize: '13px',
+              }}
+            />
+          </div>
+        </div>
+        <small style={{ display: 'block', color: '#5c6660', marginBottom: '4px' }}>
+          Đơn vị lương
+        </small>
         <select
           className="filter-select"
-          value={salary}
-          onChange={(e) => setSalary(e.target.value)}
+          value={payUnit}
+          onChange={(e) => setPayUnit(e.target.value as 'all' | PayUnit)}
         >
-          {salaryRanges.map(([v, l]) => (
-            <option value={v} key={v}>
-              {l}
+          <option value="all">Tất cả đơn vị lương</option>
+          {PAY_UNITS.map((unit) => (
+            <option key={unit} value={unit}>
+              {unit}
             </option>
           ))}
         </select>
       </div>
+
+      <div className="filter-section bordered">
+        <h3>Ngày rảnh trong tuần</h3>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+            gap: '6px',
+          }}
+        >
+          {WORK_DAYS.map((d) => {
+            const checked = selectedDays.includes(d.value)
+            return (
+              <label
+                key={d.value}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  padding: '6px 4px',
+                  borderRadius: '8px',
+                  border: checked ? '1px solid #114232' : '1px solid #d5ddd8',
+                  backgroundColor: checked ? '#eff6f1' : '#ffffff',
+                  color: checked ? '#114232' : '#3b433f',
+                  fontWeight: checked ? 700 : 500,
+                  fontSize: '12.5px',
+                  cursor: 'pointer',
+                  margin: 0,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleDay(d.value)}
+                  style={{ display: 'none' }}
+                />
+                {checked && <Check size={11} />}
+                <span>{d.value}</span>
+              </label>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="filter-section bordered">
+        <h3>Khung giờ có thể làm</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <div>
+            <small style={{ display: 'block', color: '#5c6660', marginBottom: '4px' }}>
+              Giờ bắt đầu
+            </small>
+            <input
+              type="time"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '7px 8px',
+                border: '1px solid #d5ddd8',
+                borderRadius: '8px',
+                fontSize: '13px',
+              }}
+            />
+          </div>
+          <div>
+            <small style={{ display: 'block', color: '#5c6660', marginBottom: '4px' }}>
+              Giờ kết thúc
+            </small>
+            <input
+              type="time"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '7px 8px',
+                border: '1px solid #d5ddd8',
+                borderRadius: '8px',
+                fontSize: '13px',
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="filter-section bordered">
+        <h3>Ca làm việc có thể nhận</h3>
+        {WORK_SHIFTS.map((shift) => {
+          const checked = selectedShifts.includes(shift)
+          return (
+            <label key={shift}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggleShift(shift)}
+              />
+              <span className="fake-check">{checked && <Check size={10} />}</span>
+              {shift}
+            </label>
+          )
+        })}
+      </div>
+
       <p className="no-experience">
         <Check size={13} /> Phù hợp sinh viên, không cần kinh nghiệm
       </p>
@@ -790,7 +1056,13 @@ function FindJobs({
   const [showDropdown, setShowDropdown] = useState(false)
   const [searchHistory, setSearchHistory] = useState<string[]>([])
   const [category, setCategory] = useState('Tất cả ngành nghề')
-  const [salary, setSalary] = useState('all')
+  const [minPay, setMinPay] = useState('')
+  const [maxPay, setMaxPay] = useState('')
+  const [payUnit, setPayUnit] = useState<'all' | PayUnit>('all')
+  const [selectedDays, setSelectedDays] = useState<string[]>([])
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [selectedShifts, setSelectedShifts] = useState<string[]>([])
   const [sortOrder, setSortOrder] = useState<'recommended' | 'newest' | 'oldest'>('recommended')
   const [visible, setVisible] = useState(6)
 
@@ -937,8 +1209,15 @@ function FindJobs({
     )
   }
 
-  const getPostedAgeMinutes = (posted: string) => {
-    const raw = (posted || '').trim().toLowerCase()
+  const getPostedAgeMinutes = (job: Job) => {
+    if (job.createdAt) {
+      const ts = new Date(job.createdAt).getTime()
+      if (!Number.isNaN(ts)) {
+        return Math.max(0, Math.floor((Date.now() - ts) / 60000))
+      }
+    }
+
+    const raw = (job.posted || '').trim().toLowerCase()
     if (!raw || raw.includes('vừa') || raw.includes('mới')) return 0
     if (raw.includes('hôm nay')) return 60
     if (raw.includes('hôm qua')) return 24 * 60
@@ -970,28 +1249,86 @@ function FindJobs({
   }
 
   const filtered = useMemo(() => {
+    const minVal = minPay.trim() !== '' ? Number(minPay) : null
+    const maxVal = maxPay.trim() !== '' ? Number(maxPay) : null
+    const filterStartMin = startTime ? parseTimeToMinutes(startTime) : null
+    const filterEndMin = endTime ? parseTimeToMinutes(endTime) : null
+
     const matched = jobs.filter((job) => {
       const text = `${job.title} ${job.company} ${job.category} ${job.place}`
         .toLowerCase()
         .includes(appliedQuery.trim().toLowerCase())
       const matchedCategory = category === 'Tất cả ngành nghề' || job.category === category
       const area = matchesProvince(job.place, appliedLocation)
-      const pay =
-        salary === 'all' ||
-        (salary === 'under-30' && job.hourlyRate < 30) ||
-        (salary === '30-45' && job.hourlyRate >= 30 && job.hourlyRate <= 45) ||
-        (salary === 'over-45' && job.hourlyRate > 45)
-      return text && matchedCategory && area && pay
+
+      const jobPay = parseJobPayInfo(job)
+      const matchedUnit = payUnit === 'all' || jobPay.unit === payUnit
+      const matchedMinPay = minVal === null || Number.isNaN(minVal) || jobPay.max >= minVal
+      const matchedMaxPay = maxVal === null || Number.isNaN(maxVal) || jobPay.min <= maxVal
+
+      const scheduleLower = (job.schedule || '').toLowerCase()
+      const jobDays = extractDaysFromSchedule(job.schedule || '')
+      const matchedDays =
+        selectedDays.length === 0 ||
+        scheduleLower.includes('linh hoạt') ||
+        jobDays.length === 0 ||
+        selectedDays.some((d) => jobDays.includes(d))
+
+      let matchedTime = true
+      if (filterStartMin !== null || filterEndMin !== null) {
+        const timeMatch = (job.schedule || '').match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/)
+        if (timeMatch) {
+          const jobStart = parseTimeToMinutes(timeMatch[1])
+          const jobEnd = parseTimeToMinutes(timeMatch[2])
+          if (jobStart !== null && jobEnd !== null) {
+            if (filterStartMin !== null && jobStart < filterStartMin) matchedTime = false
+            if (filterEndMin !== null && jobEnd > filterEndMin) matchedTime = false
+          }
+        }
+      }
+
+      const matchedShifts =
+        selectedShifts.length === 0 ||
+        scheduleLower.includes('linh hoạt') ||
+        selectedShifts.some((shift) => {
+          const shortLabel = shift.split('(')[0].trim().toLowerCase()
+          return scheduleLower.includes(shortLabel)
+        })
+
+      return (
+        text &&
+        matchedCategory &&
+        area &&
+        matchedUnit &&
+        matchedMinPay &&
+        matchedMaxPay &&
+        matchedDays &&
+        matchedTime &&
+        matchedShifts
+      )
     })
 
     if (sortOrder === 'recommended') return matched
 
     return [...matched].sort((a, b) => {
-      const ageA = getPostedAgeMinutes(a.posted)
-      const ageB = getPostedAgeMinutes(b.posted)
+      const ageA = getPostedAgeMinutes(a)
+      const ageB = getPostedAgeMinutes(b)
       return sortOrder === 'newest' ? ageA - ageB : ageB - ageA
     })
-  }, [jobs, appliedQuery, category, appliedLocation, salary, sortOrder])
+  }, [
+    jobs,
+    appliedQuery,
+    category,
+    appliedLocation,
+    minPay,
+    maxPay,
+    payUnit,
+    selectedDays,
+    startTime,
+    endTime,
+    selectedShifts,
+    sortOrder,
+  ])
 
   const hasDropdownContent =
     matchingHistory.length > 0 || suggestions.length > 0 || draftQuery.trim().length > 0
@@ -1006,7 +1343,13 @@ function FindJobs({
       <section className="search-bar" style={{ position: 'relative' }}>
         <div
           ref={searchBoxRef}
-          style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}
+          style={{
+            position: 'relative',
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
         >
           <label style={{ width: '100%' }}>
             <span>Vị trí hoặc từ khóa</span>
@@ -1269,9 +1612,39 @@ function FindJobs({
             setAppliedLocation(v)
             setVisible(6)
           }}
-          salary={salary}
-          setSalary={(v) => {
-            setSalary(v)
+          minPay={minPay}
+          setMinPay={(v) => {
+            setMinPay(v)
+            setVisible(6)
+          }}
+          maxPay={maxPay}
+          setMaxPay={(v) => {
+            setMaxPay(v)
+            setVisible(6)
+          }}
+          payUnit={payUnit}
+          setPayUnit={(v) => {
+            setPayUnit(v)
+            setVisible(6)
+          }}
+          selectedDays={selectedDays}
+          setSelectedDays={(updater) => {
+            setSelectedDays(updater)
+            setVisible(6)
+          }}
+          startTime={startTime}
+          setStartTime={(v) => {
+            setStartTime(v)
+            setVisible(6)
+          }}
+          endTime={endTime}
+          setEndTime={(v) => {
+            setEndTime(v)
+            setVisible(6)
+          }}
+          selectedShifts={selectedShifts}
+          setSelectedShifts={(updater) => {
+            setSelectedShifts(updater)
             setVisible(6)
           }}
           onResetAll={() => {
@@ -1281,7 +1654,13 @@ function FindJobs({
             setAppliedLocation('Tất cả tỉnh / thành phố')
             setShowDropdown(false)
             setCategory('Tất cả ngành nghề')
-            setSalary('all')
+            setMinPay('')
+            setMaxPay('')
+            setPayUnit('all')
+            setSelectedDays([])
+            setStartTime('')
+            setEndTime('')
+            setSelectedShifts([])
             setSortOrder('recommended')
             setVisible(6)
           }}
@@ -1705,7 +2084,7 @@ function ProfilePage({
                   />
                 </label>
                 <label className="full">
-                  CV hoặc ảnh hồ sơ mặc định (PDF, JPG, PNG)
+                  CV hoặc ảnh hồ sơ mặc định (PDF, JPG, PNG · Tối đa 1.5 MB)
                   <div className="file-box">
                     <div>
                       <strong>{defaultCvName || 'Chưa có hồ sơ mặc định'}</strong>
@@ -1743,6 +2122,14 @@ function ProfilePage({
                           onChange={(event) => {
                             const file = event.target.files?.[0]
                             if (!file) return
+                            if (file.size > MAX_ATTACHMENT_BYTES) {
+                              setError(
+                                'Tệp/ảnh vượt quá 1.5 MB. Vui lòng chọn tệp có dung lượng nhỏ hơn để lưu hồ sơ thành công.',
+                              )
+                              event.target.value = ''
+                              return
+                            }
+                            setError('')
                             const reader = new FileReader()
                             reader.onload = () => {
                               if (typeof reader.result === 'string') {
@@ -1974,7 +2361,14 @@ function JobDetail({
               Vị trí: {application.title} · Ngày nộp: {application.date}
             </p>
             <hr />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', margin: '0.75rem 0' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                margin: '0.75rem 0',
+              }}
+            >
               {[1, 2, 3, 4, 5].map((star) => (
                 <Star
                   key={star}
@@ -2008,7 +2402,14 @@ function JobDetail({
                 className="file-box"
                 style={{ display: 'block', lineHeight: 1.6, marginTop: '0.5rem' }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.4rem' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    marginBottom: '0.4rem',
+                  }}
+                >
                   {[1, 2, 3, 4, 5].map((star) => (
                     <Star
                       key={star}
@@ -2188,12 +2589,12 @@ function JobDetail({
             <span className="section-kicker">CA LÀM</span>
             <h3>{job.schedule}</h3>
             <p>Linh hoạt theo lịch học · Bắt đầu ngay</p>
-            <label>CV hoặc ảnh hồ sơ của bạn (PDF, JPG, PNG)</label>
+            <label>CV hoặc ảnh hồ sơ của bạn (PDF, JPG, PNG · Tối đa 1.5 MB)</label>
             <div className="file-box">
               <div>
                 <strong>{cv?.name ?? 'Chưa đính kèm tệp'}</strong>
                 <small>
-                  {cv ? 'Đã chọn tệp sẵn sàng nộp (PDF, JPG, PNG)' : 'PDF, JPG, PNG · Tối đa 10 MB'}
+                  {cv ? 'Đã chọn tệp sẵn sàng nộp (PDF, JPG, PNG)' : 'PDF, JPG, PNG · Tối đa 1.5 MB'}
                 </small>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 'none' }}>
@@ -2220,6 +2621,13 @@ function JobDetail({
                     onChange={(event) => {
                       const file = event.target.files?.[0]
                       if (!file) return
+                      if (file.size > MAX_ATTACHMENT_BYTES) {
+                        setActionError(
+                          'Tệp/ảnh vượt quá 1.5 MB. Vui lòng chọn tệp nhẹ hơn để gửi hồ sơ.',
+                        )
+                        event.target.value = ''
+                        return
+                      }
                       const reader = new FileReader()
                       reader.onload = () => {
                         const resultUrl =
@@ -2831,13 +3239,30 @@ function PostJob({
       : 'TP. Hồ Chí Minh',
   )
   const [streetAddress, setStreetAddress] = useState(defaultAddress || '')
-  const [pay, setPay] = useState('')
-  const [schedule, setSchedule] = useState('')
+  const [minPay, setMinPay] = useState('')
+  const [maxPay, setMaxPay] = useState('')
+  const [payUnit, setPayUnit] = useState<PayUnit>('K / giờ')
+  const [workDays, setWorkDays] = useState<string[]>(['T2', 'T3', 'T4', 'T5', 'T6'])
+  const [startTime, setStartTime] = useState('08:00')
+  const [endTime, setEndTime] = useState('12:00')
+  const [shifts, setShifts] = useState<string[]>(['Ca sáng (06:00–12:00)'])
   const [description, setDescription] = useState('')
   const [requirements, setRequirements] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  const toggleWorkDay = (day: string) => {
+    setWorkDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
+    )
+  }
+
+  const toggleShift = (shift: string) => {
+    setShifts((prev) =>
+      prev.includes(shift) ? prev.filter((s) => s !== shift) : [...prev, shift],
+    )
+  }
 
   const resetForm = () => {
     setTitle('')
@@ -2848,8 +3273,13 @@ function PostJob({
         : 'TP. Hồ Chí Minh',
     )
     setStreetAddress(defaultAddress || '')
-    setPay('')
-    setSchedule('')
+    setMinPay('')
+    setMaxPay('')
+    setPayUnit('K / giờ')
+    setWorkDays(['T2', 'T3', 'T4', 'T5', 'T6'])
+    setStartTime('08:00')
+    setEndTime('12:00')
+    setShifts(['Ca sáng (06:00–12:00)'])
     setDescription('')
     setRequirements('')
   }
@@ -2857,6 +3287,30 @@ function PostJob({
   const previewPlace = streetAddress.trim()
     ? `${streetAddress.trim()}, ${location}`
     : location
+
+  const previewPay = useMemo(() => {
+    const min = Number(minPay)
+    const max = Number(maxPay)
+    const suffix = payUnit.startsWith('K') ? payUnit : ` ${payUnit}`
+    if (min > 0 && max > 0 && min !== max) return `${min}–${max}${suffix}`
+    if (min > 0) return `${min}${suffix}`
+    if (max > 0) return `${max}${suffix}`
+    return 'Mức lương theo thỏa thuận'
+  }, [minPay, maxPay, payUnit])
+
+  const previewSchedule = useMemo(() => {
+    const parts: string[] = []
+    if (workDays.length > 0) {
+      parts.push(workDays.length === 7 ? 'T2–CN' : workDays.join(', '))
+    }
+    if (startTime && endTime) {
+      parts.push(`${startTime}–${endTime}`)
+    }
+    if (shifts.length > 0) {
+      parts.push(shifts.map((s) => s.split('(')[0].trim()).join(', '))
+    }
+    return parts.length > 0 ? parts.join(' · ') : 'Lịch làm việc linh hoạt'
+  }, [workDays, startTime, endTime, shifts])
 
   return (
     <main>
@@ -2870,17 +3324,40 @@ function PostJob({
           className="white-card post-form"
           onSubmit={async (event) => {
             event.preventDefault()
+            const minVal = Number(minPay)
+            const maxVal = maxPay.trim() ? Number(maxPay) : minVal
+            if (!minVal || minVal <= 0) {
+              setError('Vui lòng nhập mức lương tối thiểu hợp lệ.')
+              return
+            }
+            if (maxVal < minVal) {
+              setError('Lương tối đa phải lớn hơn hoặc bằng lương tối thiểu.')
+              return
+            }
+            if (workDays.length === 0) {
+              setError('Vui lòng chọn ít nhất 1 ngày làm việc.')
+              return
+            }
+            if (shifts.length === 0) {
+              setError('Vui lòng chọn ít nhất 1 ca làm việc.')
+              return
+            }
+
             setSubmitting(true)
-            const payParts = pay.match(/\d+/g)?.map(Number) ?? [0, 0]
             const result = await createJobAction({
               title,
               companyName,
               category,
               location,
               streetAddress,
-              hourlyMin: payParts[0] ?? 0,
-              hourlyMax: payParts[1] ?? payParts[0] ?? 0,
-              schedule,
+              hourlyMin: minVal,
+              hourlyMax: maxVal,
+              payUnit,
+              workDays,
+              startTime,
+              endTime,
+              shifts: shifts.map((s) => s.split('(')[0].trim()),
+              schedule: previewSchedule,
               description,
               requirements,
               openings: 1,
@@ -2930,6 +3407,45 @@ function PostJob({
                 ))}
               </select>
             </label>
+
+            <label>
+              Lương tối thiểu
+              <input
+                type="number"
+                min={1}
+                step="any"
+                value={minPay}
+                onChange={(e) => setMinPay(e.target.value)}
+                placeholder="Ví dụ: 30"
+                required
+              />
+            </label>
+            <label>
+              Lương tối đa
+              <input
+                type="number"
+                min={1}
+                step="any"
+                value={maxPay}
+                onChange={(e) => setMaxPay(e.target.value)}
+                placeholder="Ví dụ: 45"
+                required
+              />
+            </label>
+
+            <label>
+              Đơn vị lương
+              <select
+                value={payUnit}
+                onChange={(e) => setPayUnit(e.target.value as PayUnit)}
+              >
+                {PAY_UNITS.map((unit) => (
+                  <option key={unit} value={unit}>
+                    {unit}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label>
               Tỉnh / Thành phố (63 tỉnh thành)
               <select
@@ -2944,16 +3460,7 @@ function PostJob({
                 ))}
               </select>
             </label>
-            <label>
-              Mức lương / giờ
-              <input
-                name="pay"
-                value={pay}
-                onChange={(e) => setPay(e.target.value)}
-                placeholder="Ví dụ: 30–45K / giờ"
-                required
-              />
-            </label>
+
             <label className="full">
               Địa chỉ cụ thể (Số nhà, đường, quận/huyện/phường)
               <input
@@ -2964,16 +3471,114 @@ function PostJob({
                 required
               />
             </label>
-            <label className="full">
-              Ngày và giờ làm
+
+            <div className="full">
+              <span
+                style={{
+                  display: 'block',
+                  fontWeight: 600,
+                  fontSize: '13.5px',
+                  marginBottom: '8px',
+                }}
+              >
+                Ngày làm việc (Chọn nhiều)
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {WORK_DAYS.map((day) => {
+                  const checked = workDays.includes(day.value)
+                  return (
+                    <label
+                      key={day.value}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '7px 12px',
+                        borderRadius: '8px',
+                        border: checked ? '1px solid #114232' : '1px solid #d5ddd8',
+                        backgroundColor: checked ? '#eff6f1' : '#ffffff',
+                        color: checked ? '#114232' : '#3b433f',
+                        fontWeight: checked ? 700 : 500,
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        margin: 0,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleWorkDay(day.value)}
+                      />
+                      <span>{day.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+
+            <label>
+              Giờ bắt đầu
               <input
-                name="schedule"
-                value={schedule}
-                onChange={(e) => setSchedule(e.target.value)}
-                placeholder="Ví dụ: T2–T6, 8:00–12:00 hoặc Xoay ca linh hoạt"
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
                 required
               />
             </label>
+            <label>
+              Giờ kết thúc
+              <input
+                type="time"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                required
+              />
+            </label>
+
+            <div className="full">
+              <span
+                style={{
+                  display: 'block',
+                  fontWeight: 600,
+                  fontSize: '13.5px',
+                  marginBottom: '8px',
+                }}
+              >
+                Ca làm việc (Chọn nhiều)
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {WORK_SHIFTS.map((shift) => {
+                  const checked = shifts.includes(shift)
+                  return (
+                    <label
+                      key={shift}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '7px 12px',
+                        borderRadius: '8px',
+                        border: checked ? '1px solid #114232' : '1px solid #d5ddd8',
+                        backgroundColor: checked ? '#eff6f1' : '#ffffff',
+                        color: checked ? '#114232' : '#3b433f',
+                        fontWeight: checked ? 700 : 500,
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        margin: 0,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleShift(shift)}
+                      />
+                      <span>{shift}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+
             <label className="full">
               Mô tả công việc
               <textarea
@@ -3008,19 +3613,19 @@ function PostJob({
             <span>VIỆC CỦA BẠN</span>
             <small>{companyName || 'Đơn vị tuyển dụng'}</small>
             <h2>{title || 'Tên công việc'}</h2>
-            <strong>{pay || 'Mức lương theo giờ'}</strong>
+            <strong>{previewPay}</strong>
             <p>
               {category} · {previewPlace}
             </p>
-            <p>{schedule || 'Lịch làm việc'}</p>
+            <p>{previewSchedule}</p>
             <hr />
             <span className="status review">Chờ Admin duyệt</span>
           </div>
           <div className="posting-tip">
             <h2>Một tin rõ ràng tạo khác biệt.</h2>
-            <p>01 Minh bạch về mức lương.</p>
-            <p>02 Nêu chính xác tỉnh/thành phố, địa chỉ và thời gian.</p>
-            <p>03 Cho sinh viên biết họ sẽ làm gì.</p>
+            <p>01 Minh bạch về mức lương tối thiểu, tối đa và đơn vị trả lương.</p>
+            <p>02 Nêu chính xác các ngày làm việc, khung giờ và ca tuyển dụng.</p>
+            <p>03 Cho sinh viên biết rõ công việc cụ thể sẽ làm.</p>
           </div>
         </aside>
       </div>
@@ -4695,12 +5300,20 @@ function Footer({ go }: { go: (page: Page) => void }) {
         }}
       >
         <div>
-          <div style={{ fontSize: '22px', fontWeight: 800, letterSpacing: '-0.02em', marginBottom: '12px' }}>
+          <div
+            style={{
+              fontSize: '22px',
+              fontWeight: 800,
+              letterSpacing: '-0.02em',
+              marginBottom: '12px',
+            }}
+          >
             <span style={{ color: '#ffffff' }}>shiftly</span>
             <span style={{ color: '#d7ee9b' }}>SV</span>
           </div>
           <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.65, color: '#c4d5cc' }}>
-            Nền tảng kết nối sinh viên với việc làm bán thời gian gần trường, lương rõ ràng, ca linh hoạt.
+            Nền tảng kết nối sinh viên với việc làm bán thời gian gần trường, lương rõ ràng, ca linh
+            hoạt.
           </p>
         </div>
 
@@ -4716,12 +5329,28 @@ function Footer({ go }: { go: (page: Page) => void }) {
           >
             SINH VIÊN
           </h4>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '10px', fontSize: '14px' }}>
+          <ul
+            style={{
+              listStyle: 'none',
+              padding: 0,
+              margin: 0,
+              display: 'grid',
+              gap: '10px',
+              fontSize: '14px',
+            }}
+          >
             <li>
               <button
                 type="button"
                 onClick={() => go('jobs')}
-                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+                style={{
+                  background: 'none',
+                  border: 0,
+                  padding: 0,
+                  color: '#e6eee9',
+                  cursor: 'pointer',
+                  font: 'inherit',
+                }}
               >
                 Tìm việc làm
               </button>
@@ -4730,7 +5359,14 @@ function Footer({ go }: { go: (page: Page) => void }) {
               <button
                 type="button"
                 onClick={() => go('applications')}
-                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+                style={{
+                  background: 'none',
+                  border: 0,
+                  padding: 0,
+                  color: '#e6eee9',
+                  cursor: 'pointer',
+                  font: 'inherit',
+                }}
               >
                 Đơn ứng tuyển của tôi
               </button>
@@ -4739,7 +5375,14 @@ function Footer({ go }: { go: (page: Page) => void }) {
               <button
                 type="button"
                 onClick={() => go('signup')}
-                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+                style={{
+                  background: 'none',
+                  border: 0,
+                  padding: 0,
+                  color: '#e6eee9',
+                  cursor: 'pointer',
+                  font: 'inherit',
+                }}
               >
                 Tạo tài khoản
               </button>
@@ -4759,12 +5402,28 @@ function Footer({ go }: { go: (page: Page) => void }) {
           >
             NHÀ TUYỂN DỤNG
           </h4>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '10px', fontSize: '14px' }}>
+          <ul
+            style={{
+              listStyle: 'none',
+              padding: 0,
+              margin: 0,
+              display: 'grid',
+              gap: '10px',
+              fontSize: '14px',
+            }}
+          >
             <li>
               <button
                 type="button"
                 onClick={() => go('post-job')}
-                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+                style={{
+                  background: 'none',
+                  border: 0,
+                  padding: 0,
+                  color: '#e6eee9',
+                  cursor: 'pointer',
+                  font: 'inherit',
+                }}
               >
                 Đăng tin tuyển dụng
               </button>
@@ -4773,7 +5432,14 @@ function Footer({ go }: { go: (page: Page) => void }) {
               <button
                 type="button"
                 onClick={() => go('employer')}
-                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+                style={{
+                  background: 'none',
+                  border: 0,
+                  padding: 0,
+                  color: '#e6eee9',
+                  cursor: 'pointer',
+                  font: 'inherit',
+                }}
               >
                 Quản lý tin đã đăng
               </button>
@@ -4782,7 +5448,14 @@ function Footer({ go }: { go: (page: Page) => void }) {
               <button
                 type="button"
                 onClick={() => go('signup')}
-                style={{ background: 'none', border: 0, padding: 0, color: '#e6eee9', cursor: 'pointer', font: 'inherit' }}
+                style={{
+                  background: 'none',
+                  border: 0,
+                  padding: 0,
+                  color: '#e6eee9',
+                  cursor: 'pointer',
+                  font: 'inherit',
+                }}
               >
                 Tạo tài khoản
               </button>
@@ -4802,7 +5475,17 @@ function Footer({ go }: { go: (page: Page) => void }) {
           >
             LIÊN HỆ
           </h4>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '10px', fontSize: '14px', color: '#e6eee9' }}>
+          <ul
+            style={{
+              listStyle: 'none',
+              padding: 0,
+              margin: 0,
+              display: 'grid',
+              gap: '10px',
+              fontSize: '14px',
+              color: '#e6eee9',
+            }}
+          >
             <li>Facebook</li>
             <li>Email: nhom6@gmail.com</li>
             <li>SĐT: 0777 772 405</li>
@@ -5212,23 +5895,37 @@ export default function App({
           toggleSaved={toggleSaved}
           canSave={auth === 'student'}
           auth={auth}
-          hasCV={Boolean(
-            profileData.isProfileCompleted &&
-              (profileData.defaultCvName || profileData.defaultCvUrl),
-          )}
+          hasCV={Boolean(profileData.defaultCvName || profileData.defaultCvUrl)}
           cvName={profileData.defaultCvName}
         />
       )}
-      {page === 'detail' && selectedJob && (
+      {page === 'detail' && (selectedJob || activeApplication) && (
         <JobDetail
-          job={selectedJob}
+          job={
+            selectedJob ?? {
+              id: activeApplication!.jobId,
+              company: activeApplication!.company,
+              title: activeApplication!.title,
+              pay: activeApplication!.pay,
+              hourlyRate: 30,
+              place: activeApplication!.place,
+              schedule: activeApplication!.schedule,
+              category: 'Đa ngành nghề',
+              posted: activeApplication!.date,
+              description:
+                'Chi tiết ca làm và công việc cụ thể được nhà tuyển dụng cập nhật theo từng đợt tuyển.',
+            }
+          }
           application={activeApplication}
           auth={auth}
           userName={userName}
           profileCompleted={Boolean(profileData.isProfileCompleted)}
           defaultCv={
-            profileData.defaultCvName && profileData.defaultCvUrl
-              ? { name: profileData.defaultCvName, url: profileData.defaultCvUrl }
+            profileData.defaultCvName || profileData.defaultCvUrl
+              ? {
+                  name: profileData.defaultCvName || 'HoSo_SinhVien',
+                  url: profileData.defaultCvUrl || '',
+                }
               : null
           }
           defaultIntro={profileData.bio}
@@ -5240,7 +5937,7 @@ export default function App({
           }}
           setApplications={setApplications}
           setEmployerJobs={setEmployerJobs}
-          onStudentReviewSubmitted={syncDataFromSession}
+          onStudentReviewSubmitted={() => syncDataFromSession()}
         />
       )}
       {page === 'applications' && (
@@ -5249,23 +5946,9 @@ export default function App({
           applications={applications}
           notifications={notifications}
           onMarkNotificationRead={handleMarkNotificationRead}
-          onViewApplication={(application) => {
-            setViewingApplication(application)
-            const matchedJob = jobs.find((j) => j.id === application.jobId)
-            setSelectedJob(
-              matchedJob ?? {
-                id: application.jobId,
-                company: application.company,
-                title: application.title,
-                pay: application.pay,
-                hourlyRate: 35,
-                place: application.place,
-                schedule: application.schedule,
-                category: 'Đa ngành nghề',
-                posted: application.date,
-                description: `Vị trí ${application.title} tại ${application.company}.`,
-              },
-            )
+          onViewApplication={(appItem) => {
+            setViewingApplication(appItem)
+            setSelectedJob(null)
           }}
         />
       )}
@@ -5294,12 +5977,20 @@ export default function App({
           onSaveProfile={async (updated) => {
             setProfileData(updated)
             setUserName(updated.name)
-            await syncDataFromSession(true)
+            try {
+              const savedSession = readPersistedSession()
+              if (savedSession) {
+                writePersistedSession({
+                  ...savedSession,
+                  name: updated.name,
+                })
+              }
+            } catch {
+              // ignore
+            }
+            await syncDataFromSession(false)
           }}
-          go={(target) => {
-            if (target !== 'profile') setReturnToPage(null)
-            go(target)
-          }}
+          go={go}
         />
       )}
       {page === 'employer' && (
@@ -5317,7 +6008,7 @@ export default function App({
           companyName={profileData.companyName || userName}
           defaultLocation={profileData.companyArea}
           defaultAddress={profileData.companyAddress}
-          onJobCreated={syncDataFromSession}
+          onJobCreated={() => syncDataFromSession()}
         />
       )}
       {page === 'candidates' && (
@@ -5325,14 +6016,16 @@ export default function App({
           applications={applications}
           setApplications={setApplications}
           setEmployerJobs={setEmployerJobs}
-          employerName={userName}
-          onActionCompleted={syncDataFromSession}
+          employerName={profileData.companyName || userName}
+          onActionCompleted={() => syncDataFromSession()}
         />
       )}
       {page === 'signup' && (
         <Signup
           go={go}
-          onVerificationCreated={(data) => setPendingVerification(data)}
+          onVerificationCreated={(data) => {
+            setPendingVerification(data)
+          }}
         />
       )}
       {page === 'verify-email' && (
@@ -5345,7 +6038,7 @@ export default function App({
       {page === 'forgot-password' && <ForgotPassword go={go} />}
       {page === 'login' && (
         <Login
-          onLogin={(email, password) => login(email, password)}
+          onLogin={login}
           go={go}
           hasPendingVerification={Boolean(pendingVerification)}
         />
@@ -5356,10 +6049,13 @@ export default function App({
           initialUsers={adminUsers}
           initialJobs={adminJobs}
           initialReviews={adminReviews}
-          refreshJobs={syncDataFromSession}
+          refreshJobs={() => syncDataFromSession()}
         />
       )}
-      <Footer go={go} />
+      {page !== 'signup' &&
+        page !== 'login' &&
+        page !== 'verify-email' &&
+        page !== 'forgot-password' && <Footer go={go} />}
     </div>
   )
 }

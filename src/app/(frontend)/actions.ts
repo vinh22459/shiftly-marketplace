@@ -641,49 +641,58 @@ export async function getMarketplaceSessionAction(): Promise<ActionResult<any>> 
 export async function updateProfileAction(
   input: Partial<UserProfileData>,
 ): Promise<ActionResult<UserProfileData>> {
-  const currentUser = await getCurrentSessionUser();
-  const emailLower = (input.email ?? currentUser.email).trim().toLowerCase();
-  const nextName = (
-    currentUser.role === 'employer' && input.companyName?.trim()
-      ? input.companyName.trim()
-      : input.name?.trim() || currentUser.name
-  ).trim();
+  try {
+    const currentUser = await getCurrentSessionUser();
+    const emailLower = (input.email ?? currentUser.email).trim().toLowerCase();
+    const nextName = (
+      currentUser.role === 'employer' && input.companyName?.trim()
+        ? input.companyName.trim()
+        : input.name?.trim() || currentUser.name
+    ).trim();
 
-  const updated: UserProfileData = {
-    ...currentUser,
-    ...input,
-    name: nextName,
-    email: emailLower,
-    companyName: (input.companyName ?? currentUser.companyName).trim(),
-    isProfileCompleted: true,
-  };
+    const updated: UserProfileData = {
+      ...currentUser,
+      ...input,
+      name: nextName,
+      email: emailLower,
+      companyName: (input.companyName ?? currentUser.companyName).trim(),
+      isProfileCompleted: true,
+    };
 
-  await sql`
-    UPDATE users
-    SET
-      name = ${updated.name},
-      phone = ${updated.phone},
-      school = ${updated.school},
-      major = ${updated.major},
-      bio = ${updated.bio},
-      default_cv_name = ${updated.defaultCvName},
-      default_cv_url = ${updated.defaultCvUrl},
-      company_name = ${updated.companyName},
-      company_area = ${updated.companyArea},
-      company_address = ${updated.companyAddress},
-      company_description = ${updated.companyDescription},
-      is_profile_completed = TRUE,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE LOWER(email) = ${emailLower}
-  `;
+    await sql`
+      UPDATE users
+      SET
+        name = ${updated.name},
+        phone = ${updated.phone},
+        school = ${updated.school},
+        major = ${updated.major},
+        bio = ${updated.bio},
+        default_cv_name = ${updated.defaultCvName},
+        default_cv_url = ${updated.defaultCvUrl},
+        company_name = ${updated.companyName},
+        company_area = ${updated.companyArea},
+        company_address = ${updated.companyAddress},
+        company_description = ${updated.companyDescription},
+        is_profile_completed = TRUE,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE LOWER(email) = ${emailLower}
+    `;
 
-  await pushNotification(emailLower, {
-    title: 'Đã cập nhật hồ sơ cá nhân',
-    message: 'Thông tin hồ sơ của bạn đã được lưu và đồng bộ thành công.',
-    targetPage: currentUser.role === 'employer' ? 'employer' : 'jobs',
-  });
+    await pushNotification(emailLower, {
+      title: 'Đã cập nhật hồ sơ cá nhân',
+      message: 'Thông tin hồ sơ của bạn đã được lưu và đồng bộ thành công.',
+      targetPage: currentUser.role === 'employer' ? 'employer' : 'jobs',
+    });
 
-  return { ok: true, data: updated };
+    return { ok: true, data: updated };
+  } catch (err) {
+    console.error('[SHIFTLY UPDATE PROFILE ERROR]', err);
+    return {
+      ok: false,
+      error:
+        'Không thể lưu hồ sơ. Có thể tệp/ảnh đính kèm quá lớn hoặc kết nối cơ sở dữ liệu gặp sự cố.',
+    };
+  }
 }
 
 export async function signupAction(input: {
@@ -956,58 +965,66 @@ export async function applyToJobAction(input: {
   cvName?: string;
   cvUrl?: string;
 }): Promise<ActionResult> {
-  const currentUser = await getCurrentSessionUser();
-  const studentEmail = currentUser.email.toLowerCase();
+  try {
+    const currentUser = await getCurrentSessionUser();
+    const studentEmail = currentUser.email.toLowerCase();
 
-  const resolvedCvName = input.cvName || currentUser.defaultCvName || '';
-  const resolvedCvUrl = input.cvUrl || currentUser.defaultCvUrl || '';
-  const hasCV = Boolean(input.cvId || resolvedCvName || resolvedCvUrl);
+    const resolvedCvName = input.cvName || currentUser.defaultCvName || '';
+    const resolvedCvUrl = input.cvUrl || currentUser.defaultCvUrl || '';
+    const hasCV = Boolean(input.cvId || resolvedCvName || resolvedCvUrl);
 
-  const [studentRows, jobRows] = await Promise.all([
-    sql`SELECT id FROM users WHERE LOWER(email) = ${studentEmail} LIMIT 1`,
-    sql`SELECT employer_email FROM jobs WHERE id = ${input.jobId} LIMIT 1`,
-  ]);
+    const [studentRows, jobRows] = await Promise.all([
+      sql`SELECT id FROM users WHERE LOWER(email) = ${studentEmail} LIMIT 1`,
+      sql`SELECT employer_email FROM jobs WHERE id = ${input.jobId} LIMIT 1`,
+    ]);
 
-  const studentId = studentRows[0]?.id || null;
-  const employerEmail = jobRows[0]?.employer_email || 'ntd@gmail.com';
-  const appId = `app-${Date.now()}`;
-  const jobTitle = input.title || 'Vị trí công việc ứng tuyển';
-  const companyName = input.company || 'Đơn vị tuyển dụng';
+    const studentId = studentRows[0]?.id || null;
+    const employerEmail = jobRows[0]?.employer_email || 'ntd@gmail.com';
+    const appId = `app-${Date.now()}`;
+    const jobTitle = input.title || 'Vị trí công việc ứng tuyển';
+    const companyName = input.company || 'Đơn vị tuyển dụng';
 
-  await sql`
-    INSERT INTO applications (
-      id, job_id, student_id, student_email, student_name, student_school,
-      employer_email, job_title, company_name, pay, place, schedule,
-      introduction, has_cv, cv_name, cv_url, status, applied_date_label
-    )
-    VALUES (
-      ${appId}, ${input.jobId}, ${studentId}, ${studentEmail}, ${currentUser.name}, 'Sinh viên ứng tuyển',
-      ${employerEmail}, ${jobTitle}, ${companyName}, ${input.pay || 'Thỏa thuận'},
-      ${input.place || 'TP.HCM'}, ${input.schedule || 'Linh hoạt'},
-      ${input.introduction || currentUser.bio || ''}, ${hasCV}, ${resolvedCvName},
-      ${hasCV ? resolvedCvUrl || SAMPLE_CV_PDF_DATA_URL : ''}, 'pending', 'Vừa xong'
-    )
-  `;
+    await sql`
+      INSERT INTO applications (
+        id, job_id, student_id, student_email, student_name, student_school,
+        employer_email, job_title, company_name, pay, place, schedule,
+        introduction, has_cv, cv_name, cv_url, status, applied_date_label
+      )
+      VALUES (
+        ${appId}, ${input.jobId}, ${studentId}, ${studentEmail}, ${currentUser.name}, 'Sinh viên ứng tuyển',
+        ${employerEmail}, ${jobTitle}, ${companyName}, ${input.pay || 'Thỏa thuận'},
+        ${input.place || 'TP.HCM'}, ${input.schedule || 'Linh hoạt'},
+        ${input.introduction || currentUser.bio || ''}, ${hasCV}, ${resolvedCvName},
+        ${hasCV ? resolvedCvUrl || SAMPLE_CV_PDF_DATA_URL : ''}, 'pending', 'Vừa xong'
+      )
+    `;
 
-  await sql`
-    UPDATE jobs
-    SET application_count = application_count + 1, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ${input.jobId}
-  `;
+    await sql`
+      UPDATE jobs
+      SET application_count = application_count + 1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${input.jobId}
+    `;
 
-  await pushNotification(studentEmail, {
-    title: 'Đã gửi đơn ứng tuyển thành công',
-    message: `Hồ sơ của bạn cho vị trí "${jobTitle}" tại ${companyName} đã được gửi tới nhà tuyển dụng.`,
-    targetPage: 'applications',
-  });
+    await pushNotification(studentEmail, {
+      title: 'Đã gửi đơn ứng tuyển thành công',
+      message: `Hồ sơ của bạn cho vị trí "${jobTitle}" tại ${companyName} đã được gửi tới nhà tuyển dụng.`,
+      targetPage: 'applications',
+    });
 
-  await pushNotificationToEmployers(employerEmail, companyName, {
-    title: `Ứng viên mới: ${currentUser.name}`,
-    message: `${currentUser.name} vừa ứng tuyển vào vị trí "${jobTitle}". Nhấn để xem hồ sơ ứng viên.`,
-    targetPage: 'candidates',
-  });
+    await pushNotificationToEmployers(employerEmail, companyName, {
+      title: `Ứng viên mới: ${currentUser.name}`,
+      message: `${currentUser.name} vừa ứng tuyển vào vị trí "${jobTitle}". Nhấn để xem hồ sơ ứng viên.`,
+      targetPage: 'candidates',
+    });
 
-  return { ok: true };
+    return { ok: true };
+  } catch (err) {
+    console.error('[SHIFTLY APPLY JOB ERROR]', err);
+    return {
+      ok: false,
+      error: 'Không thể gửi đơn ứng tuyển. Vui lòng thử lại với tệp đính kèm nhẹ hơn.',
+    };
+  }
 }
 
 export async function uploadCVAction(
@@ -1150,17 +1167,48 @@ export async function createJobAction(input: any): Promise<ActionResult<{ id: st
     (currentUser.role === 'employer' ? currentUser.companyName : '') ||
     'Đơn vị tuyển dụng';
   const title = input.title;
-  const hourlyMin = Number(input.hourlyMin || 0);
-  const hourlyMax = Number(input.hourlyMax || hourlyMin);
+
+  const payMin = Number(input.hourlyMin || 0);
+  const payMax = Number(input.hourlyMax || payMin);
+  const payUnit = String(input.payUnit || 'K / giờ').trim();
+
   const payText =
-    hourlyMin && hourlyMax && hourlyMin !== hourlyMax
-      ? `${hourlyMin}–${hourlyMax}K / giờ`
-      : `${hourlyMax || hourlyMin || 30}K / giờ`;
-  const hourlyRate = (hourlyMin + hourlyMax) / 2 || 30;
+    payMin && payMax && payMin !== payMax
+      ? `${payMin}–${payMax}${payUnit.startsWith('K') ? payUnit : ` ${payUnit}`}`
+      : `${payMax || payMin || 30}${payUnit.startsWith('K') ? payUnit : ` ${payUnit}`}`;
+
+  let hourlyRate = (payMin + payMax) / 2 || 30;
+  if (payUnit === 'K / ca') {
+    hourlyRate = Math.round((hourlyRate / 4) * 10) / 10;
+  } else if (payUnit === 'Triệu / tháng') {
+    hourlyRate = Math.round(((hourlyRate * 1000) / 100) * 10) / 10;
+  }
+
   const area = input.location || currentUser.companyArea || 'TP. Hồ Chí Minh';
   const streetAddress = String(input.streetAddress || '').trim();
   const place = streetAddress ? `${streetAddress}, ${area}` : area;
-  const schedule = input.schedule || 'Linh hoạt';
+
+  const workDays: string[] = Array.isArray(input.workDays) ? input.workDays : [];
+  const shifts: string[] = Array.isArray(input.shifts) ? input.shifts : [];
+  const startTime = String(input.startTime || '').trim();
+  const endTime = String(input.endTime || '').trim();
+
+  const scheduleParts: string[] = [];
+  if (workDays.length > 0) {
+    scheduleParts.push(workDays.length === 7 ? 'T2–CN' : workDays.join(', '));
+  }
+  if (startTime && endTime) {
+    scheduleParts.push(`${startTime}–${endTime}`);
+  } else if (startTime) {
+    scheduleParts.push(`Từ ${startTime}`);
+  }
+  if (shifts.length > 0) {
+    scheduleParts.push(shifts.join(', '));
+  }
+
+  const schedule =
+    scheduleParts.length > 0 ? scheduleParts.join(' · ') : input.schedule || 'Linh hoạt';
+
   const category = input.category || 'F&B / Phục vụ';
   const description = input.description || '';
   const requirements = input.requirements || '';
