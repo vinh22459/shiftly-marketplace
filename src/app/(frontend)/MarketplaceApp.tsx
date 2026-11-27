@@ -218,6 +218,11 @@ const jobCategories = [
   'Marketing / Content',
   'Sự kiện / Lễ tân',
   'Kho vận / Giao nhận',
+  'Thiết kế / Đồ họa',
+  'Hành chính / Nhập liệu',
+  'Chăm sóc khách hàng / Tư vấn',
+  'Công nghệ thông tin',
+  'Media / Quay dựng video',
 ]
 
 const PROVINCES_63 = [
