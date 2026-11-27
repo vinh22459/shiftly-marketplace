@@ -1903,95 +1903,38 @@ function FindJobs({
               Không tìm thấy công việc phù hợp với bộ lọc hiện tại.
             </div>
           )}
-          {filtered.length > 0 && (
-            <div
-              className="load-row"
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px',
-              }}
-            >
-              <span>
-                Hiển thị {startIndex + 1}–{Math.min(startIndex + JOBS_PER_PAGE, filtered.length)}{' '}
-                trong {filtered.length} cơ hội (Trang {safeCurrentPage}/{totalPages})
-              </span>
+          {filtered.length > 0 && totalPages > 1 && (
+            <nav aria-label="Phân trang công việc" className="pagination-bar">
+              <button
+                type="button"
+                disabled={safeCurrentPage === 1}
+                onClick={() => handlePageChange(safeCurrentPage - 1)}
+              >
+                ← Trước
+              </button>
 
-              {totalPages > 1 && (
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    flexWrap: 'wrap',
-                  }}
-                >
+              {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((pageNum) => {
+                const isActive = pageNum === safeCurrentPage
+                return (
                   <button
+                    key={pageNum}
                     type="button"
-                    disabled={safeCurrentPage === 1}
-                    onClick={() => handlePageChange(safeCurrentPage - 1)}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      border: '1px solid #d5ddd8',
-                      backgroundColor: safeCurrentPage === 1 ? '#f3f5f4' : '#ffffff',
-                      color: safeCurrentPage === 1 ? '#9aa59f' : '#114232',
-                      fontWeight: 600,
-                      fontSize: '13px',
-                      cursor: safeCurrentPage === 1 ? 'not-allowed' : 'pointer',
-                    }}
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={() => handlePageChange(pageNum)}
                   >
-                    ← Trước
+                    {pageNum}
                   </button>
+                )
+              })}
 
-                  {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((pageNum) => {
-                    const isActive = pageNum === safeCurrentPage
-                    return (
-                      <button
-                        key={pageNum}
-                        type="button"
-                        aria-current={isActive ? 'page' : undefined}
-                        onClick={() => handlePageChange(pageNum)}
-                        style={{
-                          minWidth: '34px',
-                          height: '34px',
-                          padding: '0 8px',
-                          borderRadius: '8px',
-                          border: isActive ? '1px solid #114232' : '1px solid #d5ddd8',
-                          backgroundColor: isActive ? '#114232' : '#ffffff',
-                          color: isActive ? '#ffffff' : '#114232',
-                          fontWeight: 700,
-                          fontSize: '13px',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {pageNum}
-                      </button>
-                    )
-                  })}
-
-                  <button
-                    type="button"
-                    disabled={safeCurrentPage === totalPages}
-                    onClick={() => handlePageChange(safeCurrentPage + 1)}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      border: '1px solid #d5ddd8',
-                      backgroundColor: safeCurrentPage === totalPages ? '#f3f5f4' : '#ffffff',
-                      color: safeCurrentPage === totalPages ? '#9aa59f' : '#114232',
-                      fontWeight: 600,
-                      fontSize: '13px',
-                      cursor: safeCurrentPage === totalPages ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    Sau →
-                  </button>
-                </div>
-              )}
-            </div>
+              <button
+                type="button"
+                disabled={safeCurrentPage === totalPages}
+                onClick={() => handlePageChange(safeCurrentPage + 1)}
+              >
+                Sau →
+              </button>
+            </nav>
           )}
         </div>
         <aside className="right-rail">
@@ -3572,13 +3515,15 @@ function PostJob({
           }}
         >
           <h2>Chi tiết công việc</h2>
-          <p>Tất cả trường đều bắt buộc trừ khi được ghi là tùy chọn.</p>
+          <p>Điền đầy đủ thông tin để sinh viên dễ nắm bắt ca làm và mức lương.</p>
+
           {statusMessage && (
             <div className="admin-notice">
               <Check size={14} />
               {statusMessage}
             </div>
           )}
+
           <div className="form-grid">
             <label>
               Tên công việc
@@ -3590,6 +3535,7 @@ function PostJob({
                 required
               />
             </label>
+
             <label>
               Ngành nghề
               <select
@@ -3615,6 +3561,7 @@ function PostJob({
                 required
               />
             </label>
+
             <label>
               Lương tối đa
               <input
@@ -3641,8 +3588,9 @@ function PostJob({
                 ))}
               </select>
             </label>
+
             <label>
-              Tỉnh / Thành phố (63 tỉnh thành)
+              Tỉnh / Thành phố
               <select
                 name="location"
                 value={location}
@@ -3657,59 +3605,15 @@ function PostJob({
             </label>
 
             <label className="full">
-              Địa chỉ cụ thể (Số nhà, đường, quận/huyện/phường)
+              Địa chỉ cụ thể (Số nhà, đường, phường/xã, quận/huyện)
               <input
                 name="streetAddress"
                 value={streetAddress}
                 onChange={(e) => setStreetAddress(e.target.value)}
-                placeholder="Ví dụ: 123 Nguyễn Huệ, Quận 1 hoặc 45 Lê Lợi, TP. Huế"
+                placeholder="Ví dụ: 86 Cao Thắng, Phường 4, Quận 3"
                 required
               />
             </label>
-
-            <div className="full">
-              <span
-                style={{
-                  display: 'block',
-                  fontWeight: 600,
-                  fontSize: '13.5px',
-                  marginBottom: '8px',
-                }}
-              >
-                Ngày làm việc (Chọn nhiều)
-              </span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {WORK_DAYS.map((day) => {
-                  const checked = workDays.includes(day.value)
-                  return (
-                    <label
-                      key={day.value}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        padding: '7px 12px',
-                        borderRadius: '8px',
-                        border: checked ? '1px solid #114232' : '1px solid #d5ddd8',
-                        backgroundColor: checked ? '#eff6f1' : '#ffffff',
-                        color: checked ? '#114232' : '#3b433f',
-                        fontWeight: checked ? 700 : 500,
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        margin: 0,
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleWorkDay(day.value)}
-                      />
-                      <span>{day.label}</span>
-                    </label>
-                  )
-                })}
-              </div>
-            </div>
 
             <label>
               Giờ bắt đầu
@@ -3720,6 +3624,7 @@ function PostJob({
                 required
               />
             </label>
+
             <label>
               Giờ kết thúc
               <input
@@ -3730,45 +3635,45 @@ function PostJob({
               />
             </label>
 
-            <div className="full">
-              <span
-                style={{
-                  display: 'block',
-                  fontWeight: 600,
-                  fontSize: '13.5px',
-                  marginBottom: '8px',
-                }}
-              >
-                Ca làm việc (Chọn nhiều)
-              </span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            <div className="full post-option-group">
+              <span className="post-group-label">Ngày làm việc trong tuần (Chọn nhiều)</span>
+              <div className="post-days-row">
+                {WORK_DAYS.map((day) => {
+                  const checked = workDays.includes(day.value)
+                  return (
+                    <button
+                      key={day.value}
+                      type="button"
+                      aria-pressed={checked}
+                      onClick={() => toggleWorkDay(day.value)}
+                      className={`post-chip-btn ${checked ? 'is-active' : ''}`}
+                    >
+                      {checked && <Check size={13} />}
+                      <span>{day.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="full post-option-group">
+              <span className="post-group-label">Ca làm việc có thể nhận (Chọn nhiều)</span>
+              <div className="post-shifts-grid">
                 {WORK_SHIFTS.map((shift) => {
                   const checked = shifts.includes(shift)
                   return (
-                    <label
+                    <button
                       key={shift}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        padding: '7px 12px',
-                        borderRadius: '8px',
-                        border: checked ? '1px solid #114232' : '1px solid #d5ddd8',
-                        backgroundColor: checked ? '#eff6f1' : '#ffffff',
-                        color: checked ? '#114232' : '#3b433f',
-                        fontWeight: checked ? 700 : 500,
-                        fontSize: '13px',
-                        cursor: 'pointer',
-                        margin: 0,
-                      }}
+                      type="button"
+                      aria-pressed={checked}
+                      onClick={() => toggleShift(shift)}
+                      className={`post-shift-btn ${checked ? 'is-active' : ''}`}
                     >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleShift(shift)}
-                      />
-                      <span>{shift}</span>
-                    </label>
+                      <span className="post-shift-box">
+                        {checked && <Check size={12} />}
+                      </span>
+                      <span className="post-shift-text">{shift}</span>
+                    </button>
                   )
                 })}
               </div>
@@ -3780,21 +3685,23 @@ function PostJob({
                 name="description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Mô tả nhiệm vụ và môi trường làm việc"
+                placeholder="Mô tả nhiệm vụ chính, ca làm và môi trường làm việc..."
                 required
               />
             </label>
+
             <label className="full">
-              Yêu cầu
+              Yêu cầu ứng viên
               <input
                 name="requirements"
                 value={requirements}
                 onChange={(e) => setRequirements(e.target.value)}
-                placeholder="Kỹ năng và yêu cầu cần thiết"
+                placeholder="Ví dụ: Sinh viên chăm chỉ, giao tiếp tốt, có thể làm ít nhất 3 buổi/tuần"
                 required
               />
             </label>
           </div>
+
           <div className="form-actions">
             <span>Sau khi đăng, tin sẽ chuyển sang trạng thái chờ Admin duyệt.</span>
             <button type="submit" className="primary" disabled={submitting}>
@@ -3803,9 +3710,10 @@ function PostJob({
           </div>
           {error && <div className="login-error">{error}</div>}
         </form>
-        <aside>
+
+        <aside className="post-aside">
           <div className="white-card live-preview">
-            <span>VIỆC CỦA BẠN</span>
+            <span>XEM TRƯỚC TIN ĐĂNG</span>
             <small>{companyName || 'Đơn vị tuyển dụng'}</small>
             <h2>{title || 'Tên công việc'}</h2>
             <strong>{previewPay}</strong>
@@ -3816,6 +3724,7 @@ function PostJob({
             <hr />
             <span className="status review">Chờ Admin duyệt</span>
           </div>
+
           <div className="posting-tip">
             <h2>Một tin rõ ràng tạo khác biệt.</h2>
             <p>01 Minh bạch về mức lương tối thiểu, tối đa và đơn vị trả lương.</p>
@@ -3824,8 +3733,9 @@ function PostJob({
           </div>
         </aside>
       </div>
+
       <button className="text-link" onClick={() => go('employer')}>
-        ← Quay lại công việc
+        ← Quay lại tổng quan nhà tuyển dụng
       </button>
     </main>
   )
