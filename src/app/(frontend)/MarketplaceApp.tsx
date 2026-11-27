@@ -890,13 +890,20 @@ function Filters({
 
       <div className="filter-section">
         <h3>Ngành nghề</h3>
-        {jobCategories.map((item) => (
-          <label key={item}>
-            <input type="radio" checked={category === item} onChange={() => setCategory(item)} />
-            <span className="fake-check">{category === item && <Check size={10} />}</span>
-            {item}
-          </label>
-        ))}
+        {jobCategories.map((item) => {
+          const checked = category === item
+          return (
+            <label key={item}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => setCategory(item)}
+              />
+              <span className="fake-check">{checked && <Check size={10} />}</span>
+              {item}
+            </label>
+          )
+        })}
       </div>
 
       <div className="filter-section bordered">
