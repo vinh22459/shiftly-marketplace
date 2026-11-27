@@ -239,12 +239,6 @@ const QUICK_PAY_PRESETS = [
   { label: 'Từ 5 Triệu/tháng', min: '5', max: '', unit: 'Triệu / tháng' as const },
 ]
 
-const QUICK_TIME_PRESETS = [
-  { label: 'Sáng (06:00–12:00)', start: '06:00', end: '12:00' },
-  { label: 'Chiều (12:00–18:00)', start: '12:00', end: '18:00' },
-  { label: 'Tối (18:00–22:00)', start: '18:00', end: '22:00' },
-]
-
 const WORK_DAYS = [
   { value: 'T2', label: 'Thứ 2' },
   { value: 'T3', label: 'Thứ 3' },
@@ -825,8 +819,6 @@ function Hero({
 function Filters({
   category,
   setCategory,
-  location,
-  setLocation,
   minPay,
   setMinPay,
   maxPay,
@@ -845,8 +837,6 @@ function Filters({
 }: {
   category: string
   setCategory: (v: string) => void
-  location: string
-  setLocation: (v: string) => void
   minPay: string
   setMinPay: (v: string) => void
   maxPay: string
@@ -907,22 +897,6 @@ function Filters({
             {item}
           </label>
         ))}
-      </div>
-
-      <div className="filter-section bordered">
-        <h3>Tỉnh / Thành phố (63 tỉnh thành)</h3>
-        <select
-          className="filter-select"
-          style={inputStyle}
-          value={location}
-          onChange={(e) => setLocation(e.target.value)}
-        >
-          {locations.map((loc) => (
-            <option value={loc} key={loc}>
-              {loc}
-            </option>
-          ))}
-        </select>
       </div>
 
       <div className="filter-section bordered">
@@ -1069,7 +1043,7 @@ function Filters({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: '6px',
-            marginBottom: '6px',
+            marginBottom: '8px',
           }}
         >
           <h3 style={{ margin: 0 }}>Khung giờ có thể làm</h3>
@@ -1093,39 +1067,6 @@ function Filters({
               Xóa giờ
             </button>
           )}
-        </div>
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
-          {QUICK_TIME_PRESETS.map((preset) => {
-            const active = startTime === preset.start && endTime === preset.end
-            return (
-              <button
-                key={preset.label}
-                type="button"
-                onClick={() => {
-                  if (active) {
-                    setStartTime('')
-                    setEndTime('')
-                  } else {
-                    setStartTime(preset.start)
-                    setEndTime(preset.end)
-                  }
-                }}
-                style={{
-                  padding: '5px 9px',
-                  borderRadius: '999px',
-                  border: active ? '1px solid #114232' : '1px solid #d5ddd8',
-                  backgroundColor: active ? '#114232' : '#f6f8f6',
-                  color: active ? '#ffffff' : '#26312c',
-                  fontSize: '11.5px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                {preset.label}
-              </button>
-            )
-          })}
         </div>
 
         <div
@@ -1764,12 +1705,6 @@ function FindJobs({
           category={category}
           setCategory={(v) => {
             setCategory(v)
-            setVisible(6)
-          }}
-          location={appliedLocation}
-          setLocation={(v) => {
-            setDraftLocation(v)
-            setAppliedLocation(v)
             setVisible(6)
           }}
           minPay={minPay}
