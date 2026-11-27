@@ -472,26 +472,45 @@ input[type='checkbox']:checked + .fake-check {
   font-size: 14px;
   font-weight: 600;
 }
-.load-row {
-  min-height: 56px;
+
+/* Phân trang công việc */
+.pagination-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-  color: #7d8983;
-  font-size: 13px;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 20px;
+  flex-wrap: nowrap;
+  max-width: 100%;
+  overflow-x: auto;
 }
-.load-row button {
-  min-width: 190px;
-  height: 40px;
-  padding: 0 16px;
-  border: 0;
-  border-radius: 7px;
+.pagination-bar button {
+  width: auto !important;
+  min-width: 36px !important;
+  height: 36px !important;
+  padding: 0 12px !important;
+  border-radius: 8px;
+  border: 1px solid #d5ddd8;
+  background-color: #ffffff;
   color: var(--green);
-  background: white;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
+.pagination-bar button[aria-current='page'] {
+  background-color: var(--green);
+  border-color: var(--green);
+  color: #ffffff;
+}
+.pagination-bar button:disabled {
+  background-color: #f3f5f4;
+  border-color: #e3e8e5;
+  color: #9aa59f;
+  cursor: not-allowed;
+}
+
 .empty-result {
   min-height: 180px;
   display: grid;
@@ -2080,11 +2099,16 @@ input[type='checkbox']:checked + .fake-check {
     flex-wrap: wrap;
     gap: 8px;
   }
-  .load-row span {
-    display: none;
+  .pagination-bar {
+    justify-content: flex-start;
+    gap: 4px;
+    padding-bottom: 4px;
   }
-  .load-row button {
-    width: 100%;
+  .pagination-bar button {
+    min-width: 32px !important;
+    height: 34px !important;
+    padding: 0 9px !important;
+    font-size: 12.5px !important;
   }
   .candidate-profile {
     grid-column: auto;
