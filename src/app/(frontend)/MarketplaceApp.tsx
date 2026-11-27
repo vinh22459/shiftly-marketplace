@@ -231,6 +231,20 @@ const jobCategories = [
 const PAY_UNITS = ['K / giờ', 'K / ca', 'Triệu / tháng'] as const
 type PayUnit = (typeof PAY_UNITS)[number]
 
+const QUICK_PAY_PRESETS = [
+  { label: 'Từ 20K/giờ', min: '20', max: '', unit: 'K / giờ' as const },
+  { label: 'Từ 30K/giờ', min: '30', max: '', unit: 'K / giờ' as const },
+  { label: '25K – 45K/giờ', min: '25', max: '45', unit: 'K / giờ' as const },
+  { label: 'Từ 150K/ca', min: '150', max: '', unit: 'K / ca' as const },
+  { label: 'Từ 5 Triệu/tháng', min: '5', max: '', unit: 'Triệu / tháng' as const },
+]
+
+const QUICK_TIME_PRESETS = [
+  { label: 'Sáng (06:00–12:00)', start: '06:00', end: '12:00' },
+  { label: 'Chiều (12:00–18:00)', start: '12:00', end: '18:00' },
+  { label: 'Tối (18:00–22:00)', start: '18:00', end: '22:00' },
+]
+
 const WORK_DAYS = [
   { value: 'T2', label: 'Thứ 2' },
   { value: 'T3', label: 'Thứ 3' },
@@ -249,26 +263,71 @@ const WORK_SHIFTS = [
   'Xoay ca linh hoạt',
 ] as const
 
+function normalizePayNumber(rawNum: number, unit: PayUnit): number {
+  if ((unit === 'K / giờ' || unit === 'K / ca') && rawNum >= 1000) {
+    return Math.round(rawNum / 1000)
+  }
+  return rawNum
+}
+
 function parseJobPayInfo(job: Job): { min: number; max: number; unit: PayUnit } {
   const raw = (job.pay || '').trim()
   let unit: PayUnit = 'K / giờ'
-  if (/triệu\s*\/\s*tháng/i.test(raw)) unit = 'Triệu / tháng'
+  if (/triệu\s*\/\s*tháng|tr\s*\/\s*tháng/i.test(raw)) unit = 'Triệu / tháng'
   else if (/\/\s*ca/i.test(raw)) unit = 'K / ca'
 
-  const nums = raw.match(/\d+(?:[.,]\d+)?/g)?.map((n) => Number(n.replace(',', '.'))) ?? []
+  const matches = raw.match(/\d+(?:[.,]\d+)?/g) ?? []
+  const nums = matches.map((n) => {
+    const cleaned =
+      unit !== 'Triệu / tháng' && /^\d{1,3}(?:[.,]\d{3})+$/.test(n)
+        ? n.replace(/[.,]/g, '')
+        : n.replace(',', '.')
+    return normalizePayNumber(Number(cleaned), unit)
+  })
+
   if (nums.length >= 2) {
     return { min: Math.min(nums[0], nums[1]), max: Math.max(nums[0], nums[1]), unit }
   }
   if (nums.length === 1) {
     return { min: nums[0], max: nums[0], unit }
   }
-  return { min: job.hourlyRate || 0, max: job.hourlyRate || 0, unit }
+  const fallback = job.hourlyRate ? normalizePayNumber(job.hourlyRate, unit) : 0
+  return { min: fallback, max: fallback, unit }
 }
 
 function parseTimeToMinutes(timeStr: string): number | null {
   const match = timeStr.match(/^(\d{1,2}):(\d{2})$/)
   if (!match) return null
   return Number(match[1]) * 60 + Number(match[2])
+}
+
+function extractJobTimeRange(schedule: string): { start: number; end: number } | null {
+  const timeMatch = schedule.match(
+    /(\d{1,2}[:h]\d{0,2})\s*(?:–|-|đến|tới)\s*(\d{1,2}[:h]\d{0,2})/i,
+  )
+  if (timeMatch) {
+    const toMin = (str: string) => {
+      const normalized = str.toLowerCase().replace('h', ':')
+      const [hStr, mStr = '0'] = normalized.split(':')
+      const h = Number(hStr)
+      const m = Number(mStr)
+      if (Number.isNaN(h) || Number.isNaN(m)) return null
+      return h * 60 + m
+    }
+    const s = toMin(timeMatch[1])
+    let e = toMin(timeMatch[2])
+    if (s !== null && e !== null) {
+      if (e <= s) e += 24 * 60
+      return { start: s, end: e }
+    }
+  }
+
+  const lower = schedule.toLowerCase()
+  if (lower.includes('ca sáng') || lower.includes('buổi sáng')) return { start: 6 * 60, end: 12 * 60 }
+  if (lower.includes('ca chiều') || lower.includes('buổi chiều')) return { start: 12 * 60, end: 18 * 60 }
+  if (lower.includes('ca tối') || lower.includes('buổi tối')) return { start: 18 * 60, end: 22 * 60 }
+  if (lower.includes('ca đêm')) return { start: 22 * 60, end: 30 * 60 }
+  return null
 }
 
 function extractDaysFromSchedule(schedule: string): string[] {
@@ -816,8 +875,22 @@ function Filters({
     )
   }
 
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    minWidth: 0,
+    padding: '8px 10px',
+    border: '1px solid #c9d4ce',
+    borderRadius: '8px',
+    fontSize: '13px',
+    color: '#141715',
+    backgroundColor: '#ffffff',
+    pointerEvents: 'auto',
+    opacity: 1,
+    boxSizing: 'border-box',
+  }
+
   return (
-    <aside className="filters">
+    <aside className="filters" style={{ pointerEvents: 'auto' }}>
       <div className="filter-heading">
         <h2>Lọc việc làm</h2>
         <button type="button" onClick={onResetAll}>
@@ -840,6 +913,7 @@ function Filters({
         <h3>Tỉnh / Thành phố (63 tỉnh thành)</h3>
         <select
           className="filter-select"
+          style={inputStyle}
           value={location}
           onChange={(e) => setLocation(e.target.value)}
         >
@@ -853,60 +927,89 @@ function Filters({
 
       <div className="filter-section bordered">
         <h3>Mức lương mong muốn</h3>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
+          {QUICK_PAY_PRESETS.map((preset) => {
+            const active =
+              minPay === preset.min && maxPay === preset.max && payUnit === preset.unit
+            return (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => {
+                  if (active) {
+                    setMinPay('')
+                    setMaxPay('')
+                    setPayUnit('all')
+                  } else {
+                    setMinPay(preset.min)
+                    setMaxPay(preset.max)
+                    setPayUnit(preset.unit)
+                  }
+                }}
+                style={{
+                  padding: '5px 9px',
+                  borderRadius: '999px',
+                  border: active ? '1px solid #114232' : '1px solid #d5ddd8',
+                  backgroundColor: active ? '#114232' : '#f6f8f6',
+                  color: active ? '#ffffff' : '#26312c',
+                  fontSize: '11.5px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {preset.label}
+              </button>
+            )
+          })}
+        </div>
+
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
+            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
             gap: '8px',
             marginBottom: '8px',
           }}
         >
           <div>
             <small style={{ display: 'block', color: '#5c6660', marginBottom: '4px' }}>
-              Lương tối thiểu
+              Từ (mức tối thiểu)
             </small>
             <input
               type="number"
+              inputMode="numeric"
               min={0}
               step="any"
               value={minPay}
               onChange={(e) => setMinPay(e.target.value)}
               placeholder="VD: 25"
-              style={{
-                width: '100%',
-                padding: '7px 9px',
-                border: '1px solid #d5ddd8',
-                borderRadius: '8px',
-                fontSize: '13px',
-              }}
+              style={inputStyle}
             />
           </div>
           <div>
             <small style={{ display: 'block', color: '#5c6660', marginBottom: '4px' }}>
-              Lương tối đa
+              Đến (mức tối đa)
             </small>
             <input
               type="number"
+              inputMode="numeric"
               min={0}
               step="any"
               value={maxPay}
               onChange={(e) => setMaxPay(e.target.value)}
-              placeholder="VD: 45"
-              style={{
-                width: '100%',
-                padding: '7px 9px',
-                border: '1px solid #d5ddd8',
-                borderRadius: '8px',
-                fontSize: '13px',
-              }}
+              placeholder="VD: 50"
+              style={inputStyle}
             />
           </div>
         </div>
+
         <small style={{ display: 'block', color: '#5c6660', marginBottom: '4px' }}>
           Đơn vị lương
         </small>
         <select
           className="filter-select"
+          style={inputStyle}
           value={payUnit}
           onChange={(e) => setPayUnit(e.target.value as 'all' | PayUnit)}
         >
@@ -931,8 +1034,11 @@ function Filters({
           {WORK_DAYS.map((d) => {
             const checked = selectedDays.includes(d.value)
             return (
-              <label
+              <button
                 key={d.value}
+                type="button"
+                aria-pressed={checked}
+                onClick={() => toggleDay(d.value)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -946,58 +1052,109 @@ function Filters({
                   fontWeight: checked ? 700 : 500,
                   fontSize: '12.5px',
                   cursor: 'pointer',
-                  margin: 0,
                 }}
               >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggleDay(d.value)}
-                  style={{ display: 'none' }}
-                />
                 {checked && <Check size={11} />}
                 <span>{d.value}</span>
-              </label>
+              </button>
             )
           })}
         </div>
       </div>
 
       <div className="filter-section bordered">
-        <h3>Khung giờ có thể làm</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '6px',
+            marginBottom: '6px',
+          }}
+        >
+          <h3 style={{ margin: 0 }}>Khung giờ có thể làm</h3>
+          {(startTime || endTime) && (
+            <button
+              type="button"
+              onClick={() => {
+                setStartTime('')
+                setEndTime('')
+              }}
+              style={{
+                border: 0,
+                background: 'transparent',
+                color: '#114232',
+                fontSize: '11.5px',
+                fontWeight: 600,
+                padding: 0,
+                cursor: 'pointer',
+              }}
+            >
+              Xóa giờ
+            </button>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
+          {QUICK_TIME_PRESETS.map((preset) => {
+            const active = startTime === preset.start && endTime === preset.end
+            return (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => {
+                  if (active) {
+                    setStartTime('')
+                    setEndTime('')
+                  } else {
+                    setStartTime(preset.start)
+                    setEndTime(preset.end)
+                  }
+                }}
+                style={{
+                  padding: '5px 9px',
+                  borderRadius: '999px',
+                  border: active ? '1px solid #114232' : '1px solid #d5ddd8',
+                  backgroundColor: active ? '#114232' : '#f6f8f6',
+                  color: active ? '#ffffff' : '#26312c',
+                  fontSize: '11.5px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {preset.label}
+              </button>
+            )
+          })}
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+            gap: '8px',
+          }}
+        >
           <div>
             <small style={{ display: 'block', color: '#5c6660', marginBottom: '4px' }}>
-              Giờ bắt đầu
+              Từ giờ
             </small>
             <input
               type="time"
               value={startTime}
               onChange={(e) => setStartTime(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '7px 8px',
-                border: '1px solid #d5ddd8',
-                borderRadius: '8px',
-                fontSize: '13px',
-              }}
+              style={inputStyle}
             />
           </div>
           <div>
             <small style={{ display: 'block', color: '#5c6660', marginBottom: '4px' }}>
-              Giờ kết thúc
+              Đến giờ
             </small>
             <input
               type="time"
               value={endTime}
               onChange={(e) => setEndTime(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '7px 8px',
-                border: '1px solid #d5ddd8',
-                borderRadius: '8px',
-                fontSize: '13px',
-              }}
+              style={inputStyle}
             />
           </div>
         </div>
@@ -1263,8 +1420,14 @@ function FindJobs({
 
       const jobPay = parseJobPayInfo(job)
       const matchedUnit = payUnit === 'all' || jobPay.unit === payUnit
-      const matchedMinPay = minVal === null || Number.isNaN(minVal) || jobPay.max >= minVal
-      const matchedMaxPay = maxVal === null || Number.isNaN(maxVal) || jobPay.min <= maxVal
+      const matchedMinPay =
+        minVal === null ||
+        Number.isNaN(minVal) ||
+        jobPay.max >= normalizePayNumber(minVal, payUnit === 'all' ? jobPay.unit : payUnit)
+      const matchedMaxPay =
+        maxVal === null ||
+        Number.isNaN(maxVal) ||
+        jobPay.min <= normalizePayNumber(maxVal, payUnit === 'all' ? jobPay.unit : payUnit)
 
       const scheduleLower = (job.schedule || '').toLowerCase()
       const jobDays = extractDaysFromSchedule(job.schedule || '')
@@ -1276,14 +1439,11 @@ function FindJobs({
 
       let matchedTime = true
       if (filterStartMin !== null || filterEndMin !== null) {
-        const timeMatch = (job.schedule || '').match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/)
-        if (timeMatch) {
-          const jobStart = parseTimeToMinutes(timeMatch[1])
-          const jobEnd = parseTimeToMinutes(timeMatch[2])
-          if (jobStart !== null && jobEnd !== null) {
-            if (filterStartMin !== null && jobStart < filterStartMin) matchedTime = false
-            if (filterEndMin !== null && jobEnd > filterEndMin) matchedTime = false
-          }
+        const range = extractJobTimeRange(job.schedule || '')
+        if (range && !scheduleLower.includes('linh hoạt')) {
+          const rangeStart = filterStartMin ?? 0
+          const rangeEnd = filterEndMin ?? 24 * 60
+          matchedTime = range.start <= rangeEnd && range.end >= rangeStart
         }
       }
 
